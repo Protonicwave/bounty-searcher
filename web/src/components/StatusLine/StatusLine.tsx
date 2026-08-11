@@ -4,6 +4,7 @@ import type { Meta, Scan, ViewName } from '@/lib/types'
 
 import { FilterChips } from './FilterChips'
 import { QuotaGauge } from './QuotaGauge'
+import { SearchField } from './SearchField'
 
 interface Props {
   meta: Meta | undefined
@@ -15,6 +16,9 @@ interface Props {
   failed: boolean
   filters: Filters
   onRemoveFilter: (key: FilterKey) => void
+  /** True once the search key has been pressed, which is what mounts the field. */
+  searching: boolean
+  onSearch: (term: string) => void
 }
 
 function Separator() {
@@ -47,6 +51,8 @@ export function StatusLine({
   failed,
   filters,
   onRemoveFilter,
+  searching,
+  onSearch,
 }: Props) {
   const now = new Date()
   const title = meta?.views.find((v) => v.name === view)?.title ?? view
@@ -68,7 +74,11 @@ export function StatusLine({
           found
         </span>
       )}
-      <FilterChips filters={filters} onRemove={onRemoveFilter} />
+      {searching ? (
+        <SearchField initial={filters.q ?? ''} onCommit={onSearch} />
+      ) : (
+        <FilterChips filters={filters} onRemove={onRemoveFilter} />
+      )}
 
       <span className="ml-auto" />
 

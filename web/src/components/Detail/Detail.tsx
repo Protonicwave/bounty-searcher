@@ -1,5 +1,3 @@
-import { useEffect, useState } from 'react'
-
 import { useBounty } from '@/hooks/useBounties'
 import type { BountyRow } from '@/lib/types'
 
@@ -9,64 +7,36 @@ import { Header } from './Header'
 import { Provenance } from './Provenance'
 import { ScoreBreakdown } from './ScoreBreakdown'
 
-/** How long the copy action says it worked before going back to offering it. */
-const CONFIRM_MS = 1_500
-
 function Rule() {
   return <div className="my-[20px] h-px bg-line" />
-}
-
-/** Where the repository would be cloned from, taken from the issue's own host. */
-function cloneUrl(row: BountyRow): string {
-  try {
-    return `${new URL(row.url).origin}/${row.repo}.git`
-  } catch {
-    return `${row.repo}.git`
-  }
 }
 
 interface Props {
   row: BountyRow | undefined
   nowMs: number
+  onOpen: () => void
+  onCopyClone: () => void
+  /** What the copy action last did, shown in its place for a moment. */
+  copied: boolean
 }
 
 /**
  * Everything about one bounty, in the order the question is asked: what is it,
  * why is it ranked there, what does it actually say, and what will you do.
+ *
+ * The heading and the score are drawn from the list row, which is already in
+ * hand, so moving the selection never blanks the pane while a body loads.
  */
-export function Detail({ row, nowMs }: Props) {
+export function Detail({ row, nowMs, onOpen, onCopyClone, copied }: Props) {
   const detail = useBounty(row?.id ?? null)
-  const [copied, setCopied] = useState(false)
-
-  useEffect(() => {
-    if (!copied) return
-    const id = setTimeout(() => {
-      setCopied(false)
-    }, CONFIRM_MS)
-    return () => {
-      clearTimeout(id)
-    }
-  }, [copied])
 
   if (!row) {
     return <div className="scrollbar-thin overflow-y-auto bg-surface" />
   }
 
   const actions: Action[] = [
-    {
-      label: 'Open on GitHub',
-      hint: 'enter',
-      primary: true,
-      onClick: () => window.open(row.url, '_blank', 'noopener'),
-    },
-    {
-      label: copied ? 'Copied' : 'Copy clone',
-      hint: 'c',
-      onClick: () => {
-        void navigator.clipboard.writeText(`git clone ${cloneUrl(row)}`)
-        setCopied(true)
-      },
-    },
+    { label: 'Open on GitHub', hint: 'enter', primary: true, onClick: onOpen },
+    { label: copied ? 'Copied' : 'Copy clone', hint: 'c', onClick: onCopyClone },
   ]
 
   const body = detail.data?.body ?? ''
@@ -74,10 +44,7 @@ export function Detail({ row, nowMs }: Props) {
   // figure taken from a label or a comment marks nothing in the body.
   const range =
     row.amount && row.amount.provenance.field === 'body'
-      ? {
-          start: row.amount.provenance.start,
-          end: row.amount.provenance.end,
-        }
+      ? { start: row.amount.provenance.start, end: row.amount.provenance.end }
       : null
 
   return (
