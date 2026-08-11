@@ -11,13 +11,18 @@ import gc
 import sqlite3
 import time
 from collections.abc import Iterator
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
 
+from bounty_searcher.domain.models import TriageStatus
 from bounty_searcher.store.bounties import (
+    _FROM,
     BountyFilter,
     SortKey,
+    _count_from,
+    _where,
     list_bounties,
     score_bounties,
 )
@@ -102,6 +107,45 @@ def test_every_sort_reads_an_index_rather_than_sorting(
     )
     assert index in plan
     assert "TEMP B-TREE" not in plan
+
+
+FILTER_SHAPES = [
+    BountyFilter(),
+    BountyFilter(language="rust"),
+    BountyFilter(min_stars=100),
+    BountyFilter(include_claimed=False),
+    BountyFilter(max_age_days=90),
+    BountyFilter(text="pagination"),
+    BountyFilter(min_score=40),
+    BountyFilter(statuses=(TriageStatus.NEW,)),
+    BountyFilter(language="rust", min_stars=100, max_age_days=90),
+    BountyFilter(first_seen_after=NOW - timedelta(days=1)),
+]
+
+
+@pytest.mark.parametrize("filters", FILTER_SHAPES)
+def test_the_narrowed_count_counts_what_the_whole_join_would(
+    corpus: sqlite3.Connection, filters: BountyFilter
+) -> None:
+    """The count joins only the tables its filters need, and must not drift.
+
+    Every scored bounty has exactly one score row, so counting the scores is
+    counting the corpus. This is the assertion that says so for each shape,
+    against the full three-table join it replaced.
+    """
+    clauses, params = _where(filters, NOW)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+
+    narrow = corpus.execute(
+        f"SELECT COUNT(*) AS n {_count_from(filters)} {where}",  # noqa: S608
+        params,
+    ).fetchone()["n"]
+    whole = corpus.execute(
+        f"SELECT COUNT(*) AS n {_FROM} {where}",  # noqa: S608
+        params,
+    ).fetchone()["n"]
+
+    assert narrow == whole
 
 
 def test_paging_deep_into_the_corpus_stays_quick(corpus: sqlite3.Connection) -> None:
