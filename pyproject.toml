@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bounty-searcher"
+description = "Find paid GitHub issues you can actually win."
+readme = "README.md"
+requires-python = ">=3.12"
+dynamic = ["version"]
+authors = [{ name = "Shlok Bhusal" }]
+dependencies = [
+    "requests>=2.31",
+    "rich>=13.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "mypy>=1.11",
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+    "types-requests>=2.31",
+]
+
+[project.scripts]
+bounty-searcher = "bounty_searcher.cli:main"
+
+[tool.hatch.version]
+path = "bounty_searcher/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["bounty_searcher"]

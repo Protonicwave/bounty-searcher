@@ -12,7 +12,7 @@ is why they always look out of date.
 ## Setup
 
 ```sh
-pip install -r requirements.txt
+pip install -e .
 ```
 
 Set a GitHub token. It's optional but strongly recommended — it raises the
@@ -115,5 +115,6 @@ That prints nothing on a quiet run, so it composes with a notifier.
 ## Tests
 
 ```sh
-pip install pytest && python -m pytest tests -q
+pip install -e ".[dev]"
+python -m pytest -q
 ```

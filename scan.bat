@@ -34,7 +34,7 @@ if errorlevel 1 (
 python -c "import rich, requests" >nul 2>nul
 if errorlevel 1 (
     echo Installing dependencies...
-    python -m pip install -r requirements.txt
+    python -m pip install -e .
     if errorlevel 1 (
         echo ERROR: could not install dependencies.
         goto :end
