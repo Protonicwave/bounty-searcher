@@ -94,6 +94,14 @@
   }
 }
 
+/* Titles run out rather than stop. An ellipsis on every row of a dense list is
+   noise, and the fade says the same thing without adding a character. */
+@utility fade-right {
+  overflow: hidden;
+  white-space: nowrap;
+  mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent 100%);
+}
+
 @utility scrollbar-thin {
   &::-webkit-scrollbar {
     width: 10px;

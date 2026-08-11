@@ -1,12 +1,15 @@
 import { formatCount, formatWhen } from '@/lib/format'
 import type { FilterKey, Filters } from '@/lib/filters'
-import type { Meta, Scan } from '@/lib/types'
+import type { Meta, Scan, ViewName } from '@/lib/types'
 
 import { FilterChips } from './FilterChips'
 import { QuotaGauge } from './QuotaGauge'
 
 interface Props {
   meta: Meta | undefined
+  /** How many matched, which is what "found" has always meant here. */
+  total: number | undefined
+  view: ViewName
   /** True while the first request is still out, so nothing is known yet. */
   loading: boolean
   failed: boolean
@@ -38,17 +41,22 @@ function scanned(scan: Scan | null | undefined, now: Date): string {
  */
 export function StatusLine({
   meta,
+  total,
+  view,
   loading,
   failed,
   filters,
   onRemoveFilter,
 }: Props) {
   const now = new Date()
-  const total = meta?.counts.total
+  const title = meta?.views.find((v) => v.name === view)?.title ?? view
 
   return (
     <div className="flex h-status shrink-0 items-center gap-[18px] border-b border-line px-[14px] text-xs tracking-status text-fg-dim select-none">
       <span className="text-fg tracking-brand">BOUNTY&nbsp;SEARCHER</span>
+      <Separator />
+      {/* Which view is open. Four keys switch it, so it has to say so. */}
+      <span className="text-fg lowercase">{title}</span>
       <Separator />
       {failed ? (
         <span className="text-fg">api unreachable</span>

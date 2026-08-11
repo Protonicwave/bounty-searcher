@@ -27,7 +27,10 @@ export default defineConfig({
     sourcemap: true,
   },
   test: {
+    // Node by default, because most of what is worth testing here is a pure
+    // function. A test that mounts a component asks for jsdom in its own
+    // docblock rather than making every other test pay for one.
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
   },
 })

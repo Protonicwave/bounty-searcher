@@ -111,6 +111,23 @@ export interface BountyPage {
   sort: SortKey
 }
 
+/** What a transition returns: the rows it moved, and the token that reverses it. */
+export interface TriageResult {
+  bounty_ids: number[]
+  status: TriageStatus
+  undo_token: string
+}
+
+export interface UndoResult {
+  bounty_ids: number[]
+}
+
+export interface ScanStarted {
+  run_id: number
+  /** True when an unfinished sweep was picked up rather than a new one begun. */
+  resumed: boolean
+}
+
 export interface Bucket {
   budget: Budget
   limit: number
