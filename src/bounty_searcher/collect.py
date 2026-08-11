@@ -15,7 +15,7 @@ from dataclasses import replace
 from .domain.models import Bounty
 from .domain.parse import extract_amount, looks_like_bounty
 from .github import GitHub, GitHubError, JsonDict, parse_ts
-from .store import Store
+from .store.legacy import Store
 
 log = logging.getLogger(__name__)
 

@@ -1,8 +1,11 @@
-"""SQLite state: which bounties you've already seen, plus a repo metadata cache.
+"""State for the original CLI: issues already shown, plus a repo cache.
 
 The "seen" table is what makes `--new-only` work. On a schedule, that is the
 difference between re-reading the same 200 issues every morning and getting the
 handful that appeared overnight.
+
+The corpus replaces both of these. This module stays until the CLI is moved
+onto it, and then it goes.
 """
 
 from __future__ import annotations
@@ -14,7 +17,8 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any
 
-from .domain.models import ScoredBounty
+from ..domain.models import ScoredBounty
+from .db import connect, migrate
 
 REPO_CACHE_TTL = 7 * 86400  # language and star count don't move fast
 
@@ -22,39 +26,12 @@ REPO_CACHE_TTL = 7 * 86400  # language and star count don't move fast
 # refetched rather than silently scoring against absent fields.
 REPO_CACHE_FIELDS = ("language", "stars", "archived", "fork")
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS seen (
-    key         TEXT PRIMARY KEY,
-    repo        TEXT NOT NULL,
-    number      INTEGER NOT NULL,
-    title       TEXT,
-    url         TEXT,
-    amount      REAL,
-    score       REAL,
-    first_seen  REAL NOT NULL,
-    last_seen   REAL NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS repo_cache (
-    name        TEXT PRIMARY KEY,
-    data        TEXT NOT NULL,
-    fetched_at  REAL NOT NULL
-);
-"""
-
-
-def default_db_path() -> Path:
-    return Path.home() / ".bounty-searcher" / "state.db"
-
 
 class Store:
     def __init__(self, path: Path | str | None = None) -> None:
-        self.path = Path(path) if path else default_db_path()
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.path)
-        self.conn.row_factory = sqlite3.Row
-        self.conn.executescript(SCHEMA)
-        self.conn.commit()
+        self.conn: sqlite3.Connection = connect(path)
+        self.path = path
+        migrate(self.conn)
 
     def close(self) -> None:
         self.conn.close()
@@ -102,11 +79,9 @@ class Store:
                 for s in bounties
             ],
         )
-        self.conn.commit()
 
     def forget_all(self) -> int:
         cur = self.conn.execute("DELETE FROM seen")
-        self.conn.commit()
         return cur.rowcount
 
     # -- repo cache --------------------------------------------------------
@@ -128,4 +103,3 @@ class Store:
             " VALUES (?, ?, ?)",
             (name, json.dumps(data), time.time()),
         )
-        self.conn.commit()

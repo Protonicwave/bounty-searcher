@@ -24,7 +24,8 @@ from .render import (
     render_json,
     render_table,
 )
-from .store import Store, default_db_path
+from .store.db import default_db_path
+from .store.legacy import Store
 
 console = _make_console(stderr=True)
 
