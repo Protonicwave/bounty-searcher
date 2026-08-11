@@ -1,0 +1,54 @@
+# Copy to config.toml (or ~/.bounty-searcher/config.toml) and edit.
+# Every value here can also be passed as a command-line flag.
+
+[search]
+languages = ["typescript", "javascript"]
+min_amount = 50
+
+# Repos below this many stars are hidden entirely. GitHub has a lot of
+# bounty-farming spam repos; see `credible_stars` below for the softer filter
+# that only demotes them.
+min_stars = 5
+
+# Show at most this many bounties from any one repo, so a project that files
+# six near-identical issues can't take over the list. 0 disables the cap.
+per_repo = 3
+
+# Extra GitHub search qualifiers glued onto every query. Useful ones:
+#   "created:>2025-01-01"   only recent issues
+#   "-repo:some/monorepo"   exclude a repo you never want to see
+#   "comments:<5"           only uncontested threads
+extra_qualifiers = ""
+
+# Override the built-in query list entirely. Omit to use the defaults, which
+# cover label:bounty, the emoji bounty labels, Algora and Polar bot markers.
+# queries = ['label:bounty', 'label:"💰 bounty"']
+
+[scoring]
+# Payout curve: `payout_halfway` is the dollar figure that earns half of
+# `payout_max`. Lower it if you're happy with small, fast bounties.
+payout_max = 40.0
+payout_halfway = 300.0
+
+language_match = 15.0
+low_effort = 12.0
+high_effort = -10.0
+
+# How hard to punish crowded and stale threads. Raise these if you keep
+# losing races; lower them if the list is too thin.
+comment_penalty_each = 1.5
+comment_penalty_cap = 15.0
+claimed_penalty = 45.0
+freshness_max = 12.0
+freshness_zero_days = 60.0
+
+# Issues with no parseable dollar figure still show up, just demoted.
+unpriced_penalty = 12.0
+
+# Spam defence. Any priced bounty from a repo under `credible_stars` stars is
+# flagged "suspect" and hidden unless you pass --include-suspect. Raise it if
+# fake bounties still get through; drop it to 0 to trust everything.
+credible_stars = 5
+absurd_payout = 10000.0
+no_stars_penalty = 8.0
+fork_penalty = 10.0

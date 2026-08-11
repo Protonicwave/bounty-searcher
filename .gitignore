@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+config.toml
+token.txt
+*.db
+
+# build artefacts
+dist/
+build/
+*.egg-info/
+
+# frontend
+web/node_modules/
+web/dist/
+
+# local working files, never committed
+.local/

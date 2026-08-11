@@ -1,0 +1,5 @@
+# Normalise to LF in the repository, whatever the checkout platform does.
+* text=auto eol=lf
+
+# Windows refuses to run a batch file with LF line endings.
+*.bat text eol=crlf
