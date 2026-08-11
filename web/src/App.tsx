@@ -49,6 +49,8 @@ export function App() {
     [view, sort, filters],
   )
 
+  // Held still rather than rebuilt, since an optimistic edit is aimed at it.
+  const listKey = useMemo(() => keys.list(query), [query])
   const listing = useBounties(query)
   const rows = listing.data?.rows ?? NO_ROWS
   const [selected, setSelected] = useState(0)
@@ -140,7 +142,7 @@ export function App() {
   }, [scan])
 
   const { apply, undo, leaving, notice, dismissNotice } = useTriage({
-    listKey: keys.list(query),
+    listKey,
     // Tonight is the one view defined by not having decided yet, so deciding
     // is what takes a row out of it. Anywhere else the row belongs either way.
     decidedLeaves: view === 'tonight' || (filters.statuses?.length ?? 0) > 0,

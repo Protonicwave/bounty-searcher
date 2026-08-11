@@ -65,24 +65,29 @@ export function Detail({
 
   return (
     <div className="scrollbar-thin overflow-y-auto bg-surface pt-[20px] pr-[22px] pb-[26px] pl-[22px]">
-      <Header row={row} nowMs={nowMs} />
-      <Rule />
-      <ScoreBreakdown total={row.score.total} components={row.score.components} />
-      <Rule />
-      <div className="mb-[12px] text-xs tracking-brand text-fg-dimmer">ISSUE</div>
-      {detail.isPending ? (
-        <p className="font-sans text-base text-fg-dimmer">Loading the issue.</p>
-      ) : detail.isError ? (
-        <p className="font-sans text-base text-fg-dimmer">
-          The issue could not be read.
-        </p>
-      ) : (
-        <>
-          <Body source={body} range={range} />
-          <Provenance amount={row.amount} body={body} />
-        </>
-      )}
-      <Actions actions={actions} />
+      {/* One measure for the whole pane, not just the prose. It costs nothing
+          at forty per cent of the window and it is what stops the breakdown
+          from running the width of the screen when the pane is expanded. */}
+      <div className="max-w-measure">
+        <Header row={row} nowMs={nowMs} />
+        <Rule />
+        <ScoreBreakdown total={row.score.total} components={row.score.components} />
+        <Rule />
+        <div className="mb-[12px] text-xs tracking-brand text-fg-dimmer">ISSUE</div>
+        {detail.isPending ? (
+          <p className="font-sans text-base text-fg-dimmer">Loading the issue.</p>
+        ) : detail.isError ? (
+          <p className="font-sans text-base text-fg-dimmer">
+            The issue could not be read.
+          </p>
+        ) : (
+          <>
+            <Body source={body} range={range} />
+            <Provenance amount={row.amount} body={body} />
+          </>
+        )}
+        <Actions actions={actions} />
+      </div>
     </div>
   )
 }
