@@ -21,7 +21,13 @@ def test_the_parent_directory_is_created(tmp_path: Path) -> None:
 def test_migrations_run_once_and_in_order(tmp_path: Path) -> None:
     conn = connect(tmp_path / "state.db")
     first = migrate(conn)
-    assert first == ["corpus", "cli_state", "scan_caches", "drop_cli_state"]
+    assert first == [
+        "corpus",
+        "cli_state",
+        "scan_caches",
+        "drop_cli_state",
+        "filter_index",
+    ]
     assert migrate(conn) == []
     conn.close()
 
@@ -52,7 +58,13 @@ def test_a_partly_applied_migration_is_repaired_by_rerunning(tmp_path: Path) -> 
     conn = connect(tmp_path / "state.db")
     migrate(conn)
     conn.execute("DELETE FROM schema_migration")
-    assert migrate(conn) == ["corpus", "cli_state", "scan_caches", "drop_cli_state"]
+    assert migrate(conn) == [
+        "corpus",
+        "cli_state",
+        "scan_caches",
+        "drop_cli_state",
+        "filter_index",
+    ]
     conn.close()
 
 

@@ -148,6 +148,43 @@ def test_the_narrowed_count_counts_what_the_whole_join_would(
     assert narrow == whole
 
 
+@pytest.mark.parametrize(
+    "filters",
+    [
+        BountyFilter(language="rust"),
+        BountyFilter(min_stars=100),
+        BountyFilter(include_claimed=False),
+        BountyFilter(max_age_days=90),
+        BountyFilter(language="rust", min_stars=100, max_age_days=90),
+        BountyFilter(first_seen_after=NOW - timedelta(days=1)),
+    ],
+)
+def test_every_filtered_count_reads_an_index_rather_than_the_table(
+    corpus: sqlite3.Connection, filters: BountyFilter
+) -> None:
+    """The count beside a page must not read the rows it is counting.
+
+    A bounty row is mostly issue body, so a scan of the table is a scan of the
+    whole corpus by weight. This is what justifies `bounty_filters`, and it is
+    written against the query builder rather than a copy of its output so that
+    a new filter cannot quietly stop being covered.
+    """
+    clauses, params = _where(filters, NOW)
+    sql = (
+        f"SELECT COUNT(*) AS n {_count_from(filters)}"  # noqa: S608
+        f" WHERE {' AND '.join(clauses)}"
+    )
+
+    plan = [
+        row["detail"]
+        for row in corpus.execute("EXPLAIN QUERY PLAN " + sql, params)
+        if row["detail"].startswith(("SCAN b", "SEARCH b"))
+    ]
+
+    assert plan, "no access path for bounty in the plan"
+    assert all("USING" in step and "INDEX" in step for step in plan), plan
+
+
 def test_paging_deep_into_the_corpus_stays_quick(corpus: sqlite3.Connection) -> None:
     started = time.perf_counter()
     cursor = None
