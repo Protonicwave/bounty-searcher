@@ -27,7 +27,7 @@ dev = [
 bounty-searcher = "bounty_searcher.cli:main"
 
 [tool.hatch.version]
-path = "bounty_searcher/__init__.py"
+path = "src/bounty_searcher/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["bounty_searcher"]
+packages = ["src/bounty_searcher"]
