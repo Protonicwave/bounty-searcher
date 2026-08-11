@@ -65,30 +65,58 @@ min_stars = 5
 per_repo = 3
 
 [scoring]
-# Payout curve: `payout_halfway` is the dollar figure that earns half of
-# `payout_max`. Lower it if you're happy with small, fast bounties.
+# Every key below is optional, and what you see is the default. Changing any
+# of them re-scores the whole corpus on the next run, in a second or so, with
+# no network cost: scores are computed from stored fields, never refetched.
+#
+# The six groups are the six segments of the score rail, in order.
+
+# Payout. `payout_halfway` is the figure that earns half of `payout_max`, and
+# the curve asymptotes from there, so one huge number cannot dominate the
+# ranking. Lower it if you are happy with small, fast bounties.
 payout_max = 40.0
 payout_halfway = 300.0
+# What an unreadable figure costs. These still show up, just demoted: the
+# amount is often negotiated in the thread.
+unpriced_penalty = 12.0
 
+# Language, against the languages you asked for. Nothing is scored here at all
+# unless you name one, with --lang or scan.languages.
 language_match = 15.0
-low_effort = 12.0
-high_effort = -10.0
+language_unknown = -4.0
 
-# How hard to punish crowded and stale threads. Raise these if you keep
-# losing races; lower them if the list is too thin.
+# Effort, read off the labels.
+low_effort = 12.0    # good first issue, and the like
+high_effort = -10.0  # epic, rfc, and the like
+help_wanted = 4.0
+
+# Freshness. Popular bounties are claimed within hours, so age is punished.
+freshness_max = 12.0
+freshness_zero_days = 60.0
+stale_penalty = 8.0
+stale_after_days = 120.0
+
+# Competition: every comment is one more person who has looked at it, and an
+# assignee or a linked PR is usually a dead end. Raise these if you keep
+# losing races, lower them if the list is too thin.
 comment_penalty_each = 1.5
 comment_penalty_cap = 15.0
 claimed_penalty = 45.0
-freshness_max = 12.0
-freshness_zero_days = 60.0
 
-# Issues with no parseable dollar figure still show up, just demoted.
-unpriced_penalty = 12.0
-
-# Spam defence. Any priced bounty from a repo under `credible_stars` stars is
-# flagged "suspect" and hidden unless you pass --include-suspect. Raise it if
-# fake bounties still get through; drop it to 0 to trust everything.
-credible_stars = 5
-absurd_payout = 10000.0
+# The repository itself. The sweet spot is big enough to pay and small enough
+# to merge an outside PR; huge repos are slow, and forks carry the same seeded
+# bounty issue in every copy.
+sweet_spot_stars = [100, 20000]
+sweet_spot_bonus = 4.0
+crowded_stars = 50000
+crowded_penalty = 3.0
 no_stars_penalty = 8.0
 fork_penalty = 10.0
+
+# Spam defence, which is a filter rather than a weight. A priced bounty from a
+# repo under `credible_stars` is flagged suspect and hidden, as is a payout of
+# `absurd_payout` or more from a repo under `absurd_needs_stars`. Raise them if
+# fake bounties still get through; `credible_stars = 0` trusts everything.
+credible_stars = 5
+absurd_payout = 10000.0
+absurd_needs_stars = 1000
