@@ -13,10 +13,12 @@ whole corpus locally and never costs a request.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from functools import lru_cache
 from hashlib import blake2b
+from types import MappingProxyType
 
 from .models import Bounty, ComponentScore, ScoreBreakdown, ScoreComponent
 
@@ -107,7 +109,7 @@ def _payout(b: Bounty, w: ScoreWeights, suspect: bool) -> float:
         return -w.unpriced_penalty
     # Diminishing returns: at `payout_halfway` you get half the maximum, and it
     # asymptotes rather than letting one huge number dominate.
-    units = float(b.amount.units)
+    units = b.amount.scale
     return w.payout_max * (units / (units + w.payout_halfway))
 
 
@@ -169,23 +171,29 @@ def _repository(b: Bounty, w: ScoreWeights) -> float:
     return value
 
 
-def component_maxima(w: ScoreWeights) -> dict[ScoreComponent, float]:
+@lru_cache(maxsize=8)
+def component_maxima(w: ScoreWeights) -> Mapping[ScoreComponent, float]:
     """The best each component could manage for a perfect bounty.
 
     A property of the weights and not of any one bounty, so it is not stored
     per row. Whoever draws a segment to scale, or writes "9 of a possible 15",
     asks here.
+
+    Cached and read-only, because scoring the whole corpus asks 50,000 times
+    for the same six numbers.
     """
-    return {
-        ScoreComponent.PAYOUT: w.payout_max,
-        ScoreComponent.LANGUAGE: w.language_match if w.preferred_languages else 0.0,
-        ScoreComponent.EFFORT: w.low_effort + w.help_wanted,
-        ScoreComponent.FRESHNESS: w.freshness_max,
-        # Competition and repository size can only ever cost you, apart from
-        # the sweet-spot bonus.
-        ScoreComponent.COMPETITION: 0.0,
-        ScoreComponent.REPOSITORY: w.sweet_spot_bonus,
-    }
+    return MappingProxyType(
+        {
+            ScoreComponent.PAYOUT: w.payout_max,
+            ScoreComponent.LANGUAGE: w.language_match if w.preferred_languages else 0.0,
+            ScoreComponent.EFFORT: w.low_effort + w.help_wanted,
+            ScoreComponent.FRESHNESS: w.freshness_max,
+            # Competition and repository size can only ever cost you, apart
+            # from the sweet-spot bonus.
+            ScoreComponent.COMPETITION: 0.0,
+            ScoreComponent.REPOSITORY: w.sweet_spot_bonus,
+        }
+    )
 
 
 def score(
@@ -196,19 +204,30 @@ def score(
     `suspect` comes from `select.assess_suspicion`. A payout nobody can verify
     earns nothing, so the caller has to have made that judgement first.
     """
-    values = {
-        ScoreComponent.PAYOUT: _payout(b, w, suspect),
-        ScoreComponent.LANGUAGE: _language(b, w),
-        ScoreComponent.EFFORT: _effort(b, w),
-        ScoreComponent.FRESHNESS: _freshness(b, w, as_of),
-        ScoreComponent.COMPETITION: _competition(b, w),
-        ScoreComponent.REPOSITORY: _repository(b, w),
-    }
-
-    maxima = component_maxima(w)
-    components = tuple(
-        ComponentScore(component, value, maxima[component])
-        for component, value in values.items()
+    # Written out rather than looped: this runs once per row of the corpus, and
+    # the intermediate mapping cost more than the six lines it saved.
+    m = component_maxima(w)
+    components = (
+        ComponentScore(
+            ScoreComponent.PAYOUT, _payout(b, w, suspect), m[ScoreComponent.PAYOUT]
+        ),
+        ComponentScore(
+            ScoreComponent.LANGUAGE, _language(b, w), m[ScoreComponent.LANGUAGE]
+        ),
+        ComponentScore(ScoreComponent.EFFORT, _effort(b, w), m[ScoreComponent.EFFORT]),
+        ComponentScore(
+            ScoreComponent.FRESHNESS,
+            _freshness(b, w, as_of),
+            m[ScoreComponent.FRESHNESS],
+        ),
+        ComponentScore(
+            ScoreComponent.COMPETITION,
+            _competition(b, w),
+            m[ScoreComponent.COMPETITION],
+        ),
+        ComponentScore(
+            ScoreComponent.REPOSITORY, _repository(b, w), m[ScoreComponent.REPOSITORY]
+        ),
     )
     total = BASE_SCORE + sum(part.value for part in components)
 

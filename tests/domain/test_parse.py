@@ -105,3 +105,10 @@ def test_amount_units_round_trip_without_float_error() -> None:
     assert amount is not None
     assert amount.minor_units == 123_456
     assert str(amount.units) == "1234.56"
+
+
+def test_the_float_view_agrees_with_the_exact_one() -> None:
+    """Scoring reads `scale` rather than building a Decimal for every row."""
+    amount = extract_amount([], "[$1,234.56] t", "")
+    assert amount is not None
+    assert amount.scale == float(amount.units)

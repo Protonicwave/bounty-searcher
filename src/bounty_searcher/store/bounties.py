@@ -369,6 +369,51 @@ def write_scores(
         raise
 
 
+# What scoring and the suspicion rules actually read. The whole corpus goes
+# through this pass, so the columns it does not need are not fetched and the
+# objects it does not read are not built.
+_SCORING_COLUMNS = (
+    "b.id, b.repo, b.number, b.labels, b.comments, b.language, b.stars,"
+    " b.is_fork, b.claim_reason, b.amount_minor, b.amount_currency,"
+    " b.created_at, b.updated_at"
+)
+
+# Scoring reads a payout's size and nothing else about it. This stands in for
+# the parts it never looks at, and cannot escape: the bounties built here are
+# scored and discarded inside one function.
+_UNREAD_PROVENANCE = Provenance(AmountField.BODY, "", 0, 0, "")
+
+
+def _bounty_for_scoring(row: sqlite3.Row) -> Bounty:
+    """A bounty carrying only what the scorer and the suspicion rules read."""
+    minor = row["amount_minor"]
+    return Bounty(
+        source="",
+        repo=row["repo"],
+        number=row["number"],
+        title="",
+        url="",
+        created_at=from_ts(row["created_at"]),
+        updated_at=from_ts(row["updated_at"]),
+        labels=tuple(json.loads(row["labels"])),
+        comments=row["comments"],
+        language=row["language"],
+        stars=row["stars"],
+        is_fork=bool(row["is_fork"]),
+        claim_reason=row["claim_reason"],
+        amount=(
+            None
+            if minor is None
+            else Amount(
+                minor_units=minor,
+                currency=row["amount_currency"],
+                confidence=Confidence.HIGH,
+                provenance=_UNREAD_PROVENANCE,
+            )
+        ),
+    )
+
+
 def score_bounties(
     conn: sqlite3.Connection,
     weights: ScoreWeights,
@@ -383,7 +428,7 @@ def score_bounties(
     has. This is what makes a weight change cost milliseconds rather than a
     refetch.
     """
-    sql = f"SELECT {_BOUNTY_COLUMNS} FROM bounty b"  # noqa: S608 - fixed columns
+    sql = f"SELECT {_SCORING_COLUMNS} FROM bounty b"  # noqa: S608 - fixed columns
     params: tuple[object, ...] = ()
     if bounty_ids is not None:
         if not bounty_ids:
@@ -396,7 +441,7 @@ def score_bounties(
     while batch := cursor.fetchmany(batch_size):
         scores = []
         for row in batch:
-            b = _bounty_from_row(row)
+            b = _bounty_for_scoring(row)
             reason = assess_suspicion(b, weights)
             scores.append(
                 (

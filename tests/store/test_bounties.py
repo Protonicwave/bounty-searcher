@@ -6,7 +6,8 @@ from pathlib import Path
 import pytest
 
 from bounty_searcher.domain.models import AmountField, TriageStatus
-from bounty_searcher.domain.scoring import ScoreWeights
+from bounty_searcher.domain.scoring import ScoreWeights, score
+from bounty_searcher.domain.select import assess_suspicion
 from bounty_searcher.store.bounties import (
     BountyFilter,
     Cursor,
@@ -350,3 +351,27 @@ def test_an_expired_snooze_is_counted_as_new_again(conn: sqlite3.Connection) -> 
 
     assert counts(conn, NOW).by_status == {TriageStatus.SNOOZED: 1}
     assert counts(conn, NOW + timedelta(days=2)).by_status == {TriageStatus.NEW: 1}
+
+
+def test_the_scoring_pass_agrees_with_scoring_the_whole_bounty(
+    conn: sqlite3.Connection,
+) -> None:
+    """It reads a narrower row, so it has to reach the same answer."""
+    items = [
+        bounty(1, labels=("bounty", "good first issue"), comments=4),
+        bounty(2, amount=None, language=None, stars=0),
+        bounty(3, claim_reason="assigned to someone", is_fork=True),
+        bounty(4, stars=0),
+    ]
+    fill(conn, items)
+
+    stored = {
+        row.bounty.number: row.score.total
+        for row in list_bounties(
+            conn, as_of=NOW, filters=BountyFilter(include_suspect=True)
+        ).rows
+    }
+    for item in items:
+        reason = assess_suspicion(item, WEIGHTS)
+        expected = score(item, WEIGHTS, NOW, suspect=reason is not None)
+        assert stored[item.number] == expected.total

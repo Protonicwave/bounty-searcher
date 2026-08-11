@@ -42,7 +42,7 @@ def assess_suspicion(b: Bounty, w: ScoreWeights) -> str | None:
     # the include-suspect switch is for.
     if stars < w.credible_stars:
         return f"{_money(b)} from a {stars}-star repo"
-    if float(b.amount.units) >= w.absurd_payout and stars < w.absurd_needs_stars:
+    if b.amount.scale >= w.absurd_payout and stars < w.absurd_needs_stars:
         return f"{_money(b)} is implausible for {stars:,} stars"
     return None
 

@@ -16,7 +16,7 @@ from enum import StrEnum
 # exponent covers all of them. Add a per-currency table only when that stops
 # being true.
 MINOR_UNIT_EXPONENT = 2
-_MINOR_UNITS = 10**MINOR_UNIT_EXPONENT
+_MINOR_UNITS: int = 10**MINOR_UNIT_EXPONENT
 
 
 class AmountField(StrEnum):
@@ -83,8 +83,18 @@ class Amount:
 
     @property
     def units(self) -> Decimal:
-        """The value in major units, for display and for comparisons."""
+        """The value in major units, exactly, for display."""
         return Decimal(self.minor_units).scaleb(-MINOR_UNIT_EXPONENT)
+
+    @property
+    def scale(self) -> float:
+        """The value in major units, for arithmetic that is already inexact.
+
+        Scoring multiplies this by weights and thresholds it, so the exactness
+        of a Decimal buys nothing there and building one for every row in the
+        corpus is the most expensive thing on the re-score pass.
+        """
+        return self.minor_units / _MINOR_UNITS
 
 
 @dataclass(frozen=True, slots=True)
