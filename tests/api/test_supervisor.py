@@ -190,3 +190,28 @@ async def test_stopping_leaves_no_subscriber_waiting(
 
     assert await asyncio.wait_for(watcher, timeout=1) == []
     assert not supervisor.running
+
+
+async def test_a_sweep_that_fails_after_starting_is_collected(tmp_path: Path) -> None:
+    """Nobody awaits the task once the run id is out, so it must not be dropped."""
+    started = asyncio.Event()
+
+    async def fails_later(
+        now: datetime, on_start: StartHook, on_progress: ProgressHook
+    ) -> ScanOutcome:
+        on_start(RUN_ID, False)
+        started.set()
+        raise RuntimeError("rate limited")
+
+    with Database(tmp_path / "state.db") as db:
+        supervisor = ScanSupervisor(
+            db, settings=ScanSettings(), weights=WEIGHTS, sweep=fails_later
+        )
+        assert await supervisor.start(NOW) == (RUN_ID, False)
+        await started.wait()
+        while supervisor.running:
+            await asyncio.sleep(0)
+
+        # The failure is behind us, so another sweep may be started.
+        assert not supervisor.running
+        await supervisor.stop()

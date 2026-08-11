@@ -38,6 +38,24 @@ class ScanBusy(RuntimeError):
     """A sweep is already running. Two at once would fight over the quota."""
 
 
+def _log_outcome(task: asyncio.Task[ScanOutcome]) -> None:
+    """Collect how a sweep ended, whatever that was."""
+    if task.cancelled():
+        log.info("scan cancelled")
+        return
+    if (error := task.exception()) is not None:
+        log.error("scan failed: %s", error)
+        return
+    outcome = task.result()
+    log.info(
+        "scan %d finished: %d/%d queries, %d new",
+        outcome.run_id,
+        outcome.completed,
+        outcome.planned,
+        outcome.inserted,
+    )
+
+
 class ScanSupervisor:
     """The one background sweep, and the subscribers watching it."""
 
@@ -99,6 +117,11 @@ class ScanSupervisor:
 
         self._latest = None
         self._task = asyncio.create_task(self._supervise(now, on_start))
+        # Nobody awaits the task once this call has its run id, so whatever it
+        # ends with has to be collected here or the loop complains at collection
+        # time about an exception nothing retrieved.
+        self._task.add_done_callback(_log_outcome)
+
         # If the sweep fails before it opens a run, fail the wait with it rather
         # than hanging on a future nobody will ever resolve.
         done, _ = await asyncio.wait(
@@ -107,7 +130,9 @@ class ScanSupervisor:
         if started in done:
             return started.result()
         await self._task  # raises whatever went wrong
-        raise ScanBusy("the scan ended before it opened a run")
+        # It finished cleanly without ever opening a run, which a real sweep
+        # cannot do. Not a conflict: something is wrong with the sweep itself.
+        raise RuntimeError("the scan ended before it opened a run")
 
     async def stop(self) -> None:
         """Cancel a running sweep and wait for it to put itself away."""
