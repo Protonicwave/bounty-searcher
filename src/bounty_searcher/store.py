@@ -1,8 +1,8 @@
 """SQLite state: which bounties you've already seen, plus a repo metadata cache.
 
-The "seen" table is what makes `--new-only` work -- on a schedule, that's the
-difference between re-reading the same 200 issues every morning and getting
-the handful that appeared overnight.
+The "seen" table is what makes `--new-only` work. On a schedule, that is the
+difference between re-reading the same 200 issues every morning and getting the
+handful that appeared overnight.
 """
 
 from __future__ import annotations
@@ -11,9 +11,10 @@ import json
 import sqlite3
 import time
 from pathlib import Path
+from types import TracebackType
 from typing import Any
 
-from .models import Bounty
+from .domain.models import ScoredBounty
 
 REPO_CACHE_TTL = 7 * 86400  # language and star count don't move fast
 
@@ -47,7 +48,7 @@ def default_db_path() -> Path:
 
 
 class Store:
-    def __init__(self, path: Path | str | None = None):
+    def __init__(self, path: Path | str | None = None) -> None:
         self.path = Path(path) if path else default_db_path()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(self.path)
@@ -61,7 +62,12 @@ class Store:
     def __enter__(self) -> Store:
         return self
 
-    def __exit__(self, *exc: object) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
         self.close()
 
     # -- seen tracking -----------------------------------------------------
@@ -69,7 +75,7 @@ class Store:
     def known_keys(self) -> set[str]:
         return {row["key"] for row in self.conn.execute("SELECT key FROM seen")}
 
-    def record(self, bounties: list[Bounty]) -> None:
+    def record(self, bounties: list[ScoredBounty]) -> None:
         now = time.time()
         self.conn.executemany(
             """
@@ -82,8 +88,18 @@ class Store:
                 amount    = excluded.amount
             """,
             [
-                (b.key, b.repo, b.number, b.title, b.url, b.amount, b.score, now, now)
-                for b in bounties
+                (
+                    s.bounty.key,
+                    s.bounty.repo,
+                    s.bounty.number,
+                    s.bounty.title,
+                    s.bounty.url,
+                    float(s.bounty.amount.units) if s.bounty.amount else None,
+                    s.score.total,
+                    now,
+                    now,
+                )
+                for s in bounties
             ],
         )
         self.conn.commit()
@@ -108,8 +124,8 @@ class Store:
 
     def put_repo(self, name: str, data: dict[str, Any]) -> None:
         self.conn.execute(
-            "INSERT OR REPLACE INTO repo_cache (name, data, fetched_at) "
-            "VALUES (?, ?, ?)",
+            "INSERT OR REPLACE INTO repo_cache (name, data, fetched_at)"
+            " VALUES (?, ?, ?)",
             (name, json.dumps(data), time.time()),
         )
         self.conn.commit()

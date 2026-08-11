@@ -7,15 +7,23 @@ import logging
 import os
 import sys
 import tomllib
+from dataclasses import fields
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from .collect import build_queries, collect, detect_claims, enrich_repos
+from .domain.models import Bounty, ScoredBounty
+from .domain.scoring import ScoreWeights
+from .domain.select import cap_per_repo, rank
 from .github import GitHub, RateLimited
-from .models import Bounty
-from .render import _make_console, render_explain, render_json, render_table
-from .scoring import ScoreWeights, score_all
-from .select import cap_per_repo, describe_dropped
+from .render import (
+    _make_console,
+    describe_dropped,
+    render_explain,
+    render_json,
+    render_table,
+)
 from .store import Store, default_db_path
 
 console = _make_console(stderr=True)
@@ -128,31 +136,35 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def weights_from(config: dict[str, Any], languages: list[str]) -> ScoreWeights:
-    w = ScoreWeights(preferred_languages=languages)
-    for key, value in (config.get("scoring") or {}).items():
-        if hasattr(w, key):
-            setattr(w, key, value)
-    return w
+    known = {f.name for f in fields(ScoreWeights)}
+    overrides = {
+        key: value
+        for key, value in (config.get("scoring") or {}).items()
+        if key in known
+    }
+    overrides["preferred_languages"] = tuple(languages)
+    return ScoreWeights(**overrides)
 
 
 def passes_filters(
-    b: Bounty,
+    scored: ScoredBounty,
     args: argparse.Namespace,
     min_amount: float | None,
     min_stars: int | None,
 ) -> bool:
-    if b.score < args.min_score:
+    b = scored.bounty
+    if scored.score.total < args.min_score:
         return False
     if not args.include_claimed and b.claimed:
         return False
-    if not args.include_suspect and b.suspect:
+    if not args.include_suspect and scored.suspect:
         return False
     if min_stars is not None and (b.stars or 0) < min_stars:
         return False
-    # An unpriced bounty can't fail an amount floor -- the number is often
+    # An unpriced bounty can't fail an amount floor: the number is often
     # negotiated in the thread, so those stay visible.
     if min_amount is not None and b.amount is not None:
-        return b.amount >= min_amount
+        return float(b.amount.units) >= min_amount
     return True
 
 
@@ -201,8 +213,12 @@ def main(argv: list[str] | None = None) -> int:
     def progress(i: int, total: int, query: str, kept: int) -> None:
         console.print(f"[dim][{i}/{total}][/] {query} [dim]-> {kept} new[/]")
 
+    # The clock is read once, here at the edge, and passed down. Everything
+    # below scores against this moment rather than its own.
+    now = datetime.now(UTC)
+
     try:
-        bounties = collect(
+        bounties: list[Bounty] = collect(
             gh, queries, max_per_query=args.max_per_query, on_progress=progress
         )
         if not bounties:
@@ -213,16 +229,18 @@ def main(argv: list[str] | None = None) -> int:
         console.print(
             f"[dim]resolving metadata for {len({b.repo for b in bounties})} repos...[/]"
         )
-        enrich_repos(gh, bounties, store)
+        bounties = enrich_repos(gh, bounties, store)
 
         weights = weights_from(config, languages)
-        bounties = score_all(bounties, weights)
 
         if args.deep:
-            shortlist = [b for b in bounties if not b.claimed][: args.deep]
+            ranked = rank(bounties, weights, now)
+            shortlist = [s.bounty for s in ranked if not s.bounty.claimed][: args.deep]
             console.print(f"[dim]deep-checking top {len(shortlist)} for claims...[/]")
-            detect_claims(gh, shortlist)
-            bounties = score_all(bounties, weights)
+            checked = {b.key: b for b in detect_claims(gh, shortlist)}
+            bounties = [checked.get(b.key, b) for b in bounties]
+
+        scored = rank(bounties, weights, now)
 
     except RateLimited as exc:
         console.print(f"[red]{exc}[/]")
@@ -230,24 +248,24 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     known = store.known_keys()
-    new_keys = {b.key for b in bounties} - known
+    new_keys = {s.bounty.key for s in scored} - known
 
-    results = [b for b in bounties if passes_filters(b, args, min_amount, min_stars)]
-    hidden = len(bounties) - len(results)
+    results = [s for s in scored if passes_filters(s, args, min_amount, min_stars)]
+    hidden = len(scored) - len(results)
     if args.new_only:
-        results = [b for b in results if b.key in new_keys]
+        results = [s for s in results if s.bounty.key in new_keys]
 
     # Applied last, so the cap operates on what you'd actually have been shown.
     results, dropped = cap_per_repo(results, per_repo)
 
     if not args.no_record:
-        store.record(bounties)
+        store.record(scored)
     store.close()
 
     shown = results[: args.limit]
 
     if args.json:
-        render_json(shown, new_keys)
+        render_json(shown, now, new_keys)
     elif not shown:
         console.print(
             "[yellow]Nothing passed your filters.[/] "
@@ -258,7 +276,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
     else:
-        render_table(shown, new_keys, total=len(bounties))
+        render_table(shown, now, new_keys, total=len(scored))
         if note := describe_dropped(dropped, per_repo):
             console.print(f"[dim]{note}[/]")
         if hidden:

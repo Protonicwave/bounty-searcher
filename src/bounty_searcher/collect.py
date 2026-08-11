@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import replace
 
+from .domain.models import Bounty
+from .domain.parse import extract_amount, looks_like_bounty
 from .github import GitHub, GitHubError, JsonDict, parse_ts
-from .models import Bounty
-from .parse import extract_amount, looks_like_bounty
 from .store import Store
 
 log = logging.getLogger(__name__)
@@ -70,14 +71,13 @@ def item_to_bounty(item: JsonDict, source: str) -> Bounty | None:
     if "pull_request" in item:
         return None  # search sometimes leaks PRs despite type:issue
 
-    labels = [label["name"] for label in item.get("labels", [])]
+    labels = tuple(label["name"] for label in item.get("labels", []))
     title = item.get("title", "")
     body = item.get("body") or ""
 
     if not looks_like_bounty(labels, title, body):
         return None
 
-    amount, currency, amount_source = extract_amount(labels, title, body)
     assignee = (item.get("assignee") or {}).get("login")
 
     return Bounty(
@@ -93,11 +93,8 @@ def item_to_bounty(item: JsonDict, source: str) -> Bounty | None:
         comments=item.get("comments", 0),
         assignee=assignee,
         state=item.get("state", "open"),
-        amount=amount,
-        currency=currency,
-        amount_source=amount_source,
-        claimed=bool(assignee),
-        claim_reason=f"assigned to @{assignee}" if assignee else "",
+        amount=extract_amount(labels, title, body),
+        claim_reason=f"assigned to @{assignee}" if assignee else None,
     )
 
 
@@ -138,11 +135,11 @@ def collect(
     return list(found.values())
 
 
-def enrich_repos(gh: GitHub, bounties: list[Bounty], store: Store) -> None:
+def enrich_repos(gh: GitHub, bounties: list[Bounty], store: Store) -> list[Bounty]:
     """Attach language and star count, using the on-disk cache where possible.
 
     Search results don't include repo metadata, so this is one API call per
-    unique repo -- cached for a week since language and rough star count don't
+    unique repo, cached for a week since language and rough star count don't
     move fast enough to matter for scoring.
     """
     repos = {b.repo for b in bounties}
@@ -167,54 +164,67 @@ def enrich_repos(gh: GitHub, bounties: list[Bounty], store: Store) -> None:
         store.put_repo(name, record)
         meta[name] = record
 
+    enriched = []
     for b in bounties:
         info = meta.get(b.repo)
-        if info:
-            b.language = info.get("language")
-            b.stars = info.get("stars")
-            b.is_fork = info.get("fork", False)
-            if info.get("archived"):
-                b.claimed = True
-                b.claim_reason = "repo archived"
+        if info is None:
+            enriched.append(b)
+            continue
+        # An archived repo will not merge anything, so treat it exactly like a
+        # bounty somebody else has already taken.
+        claim_reason = "repo archived" if info.get("archived") else b.claim_reason
+        enriched.append(
+            replace(
+                b,
+                language=info.get("language"),
+                stars=info.get("stars"),
+                is_fork=info.get("fork", False),
+                claim_reason=claim_reason,
+            )
+        )
+    return enriched
 
 
-def detect_claims(gh: GitHub, bounties: list[Bounty]) -> None:
+def _find_claim(gh: GitHub, b: Bounty) -> str | None:
+    """Why this issue is already spoken for, or None."""
+    dibs_markers = ("/attempt", "i'll take this", "working on this", "i am working on")
+
+    try:
+        events = gh.issue_timeline(b.repo, b.number)
+    except GitHubError as exc:
+        log.debug("timeline failed for %s: %s", b.key, exc)
+        events = []
+
+    for event in events:
+        if event.get("event") == "cross-referenced":
+            issue = event.get("source", {}).get("issue", {})
+            if "pull_request" in issue and issue.get("state") == "open":
+                return f"open PR #{issue.get('number')} references it"
+
+    try:
+        comments = gh.issue_comments(b.repo, b.number)
+    except GitHubError:
+        return None
+
+    for comment in comments:
+        text = (comment.get("body") or "").lower()
+        if any(marker in text for marker in dibs_markers):
+            author = (comment.get("user") or {}).get("login", "someone")
+            return f"@{author} claimed it in a comment"
+
+    return None
+
+
+def detect_claims(gh: GitHub, bounties: list[Bounty]) -> list[Bounty]:
     """Deep check: has someone already opened a PR or called dibs?
 
     Two API calls per issue, so callers should only run this on the shortlist
     they're actually considering working on.
     """
-    dibs_markers = ("/attempt", "i'll take this", "working on this", "i am working on")
-
+    checked = []
     for b in bounties:
-        if b.claimed:
-            continue
-        try:
-            events = gh.issue_timeline(b.repo, b.number)
-        except GitHubError as exc:
-            log.debug("timeline failed for %s: %s", b.key, exc)
-            continue
-
-        for event in events:
-            if event.get("event") == "cross-referenced":
-                issue = event.get("source", {}).get("issue", {})
-                if "pull_request" in issue and issue.get("state") == "open":
-                    b.claimed = True
-                    b.claim_reason = f"open PR #{issue.get('number')} references it"
-                    break
-
-        if b.claimed:
-            continue
-
-        try:
-            comments = gh.issue_comments(b.repo, b.number)
-        except GitHubError:
-            continue
-
-        for comment in comments:
-            text = (comment.get("body") or "").lower()
-            if any(marker in text for marker in dibs_markers):
-                author = (comment.get("user") or {}).get("login", "someone")
-                b.claimed = True
-                b.claim_reason = f"@{author} claimed it in a comment"
-                break
+        reason = b.claim_reason if b.claimed else _find_claim(gh, b)
+        checked.append(
+            b if reason == b.claim_reason else replace(b, claim_reason=reason)
+        )
+    return checked
