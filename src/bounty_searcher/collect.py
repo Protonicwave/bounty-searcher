@@ -1,7 +1,7 @@
 """Turning GitHub search results into scored Bounty objects.
 
-The search step is deliberately broad -- a dozen overlapping queries, then
-dedupe -- because there is no single label or convention that catches even
+The search step is deliberately broad, a dozen overlapping queries and then
+a dedupe, because there is no single label or convention that catches even
 half of the bounties on GitHub. Precision comes from `parse.looks_like_bounty`
 and the scorer, not from the queries.
 """
@@ -98,7 +98,7 @@ def item_to_bounty(item: JsonDict, source: str) -> Bounty | None:
     )
 
 
-# (index, total, query, kept) -- enough for a caller to draw a progress line.
+# (index, total, query, kept): enough for a caller to draw a progress line.
 type ProgressHook = Callable[[int, int, str, int], None]
 
 
