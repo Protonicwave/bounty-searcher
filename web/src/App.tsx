@@ -1,20 +1,22 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import { BountyList } from '@/components/BountyList'
+import { BountyList, Quiet } from '@/components/BountyList'
 import { Detail } from '@/components/Detail'
 import { CommandPalette, HelpSheet } from '@/components/Overlays'
 import { StatusLine } from '@/components/StatusLine'
+import { UndoNotice } from '@/components/UndoNotice'
 import { useBounties } from '@/hooks/useBounties'
 import { useKeymap, type Binding } from '@/hooks/useKeymap'
 import { useMeta } from '@/hooks/useMeta'
 import { useNow } from '@/hooks/useNow'
+import { useTriage } from '@/hooks/useTriage'
 import { api, type BountyQuery } from '@/lib/api'
 import { buildCommands, VIEW_ORDER } from '@/lib/commands'
 import { withoutFilter, type FilterKey, type Filters } from '@/lib/filters'
 import { cloneCommand } from '@/lib/github'
 import { keys } from '@/lib/keys'
-import type { BountyRow, SortKey, ViewName } from '@/lib/types'
+import type { BountyRow, SortKey, TriageStatus, ViewName } from '@/lib/types'
 
 /** One array identity for every empty list, so nothing re-renders on nothing. */
 const NO_ROWS: BountyRow[] = []
@@ -54,12 +56,29 @@ export function App() {
   const [searching, setSearching] = useState(false)
   const [overlay, setOverlay] = useState<OverlayName | null>(null)
   const [copied, setCopied] = useState(false)
+  const [restoring, setRestoring] = useState<number | null>(null)
 
   // A different question deserves its first answer, not the position you held
   // in the last one.
   useEffect(() => {
     setSelected(0)
   }, [query])
+
+  // Rows leave under a dismissal, and the selection cannot follow them out.
+  useEffect(() => {
+    setSelected((at) => Math.max(0, Math.min(at, rows.length - 1)))
+  }, [rows.length])
+
+  // An undo puts a row back, and the selection goes back to it. It may take a
+  // refetch to arrive, so this waits for it rather than guessing where it went.
+  useEffect(() => {
+    if (restoring === null) return
+    const at = rows.findIndex((row) => row.id === restoring)
+    if (at !== -1) {
+      setSelected(at)
+      setRestoring(null)
+    }
+  }, [restoring, rows])
 
   useEffect(() => {
     if (!copied) return
@@ -116,6 +135,32 @@ export function App() {
       void client.invalidateQueries({ queryKey: keys.meta })
     },
   })
+  const startScan = useCallback(() => {
+    scan.mutate()
+  }, [scan])
+
+  const { apply, undo, leaving, notice, dismissNotice } = useTriage({
+    listKey: keys.list(query),
+    // Tonight is the one view defined by not having decided yet, so deciding
+    // is what takes a row out of it. Anywhere else the row belongs either way.
+    decidedLeaves: view === 'tonight' || (filters.statuses?.length ?? 0) > 0,
+    onRestore: (ids) => {
+      setRestoring(ids[0] ?? null)
+    },
+  })
+
+  const decide = useCallback(
+    (status: TriageStatus) => {
+      if (current) apply(current.id, status)
+    },
+    [current, apply],
+  )
+  const shortlist = useCallback(() => {
+    decide('shortlisted')
+  }, [decide])
+  const dismiss = useCallback(() => {
+    decide('dismissed')
+  }, [decide])
 
   const commands = useMemo(
     () =>
@@ -125,12 +170,10 @@ export function App() {
         setView,
         setSort,
         setFilters,
-        startScan: () => {
-          scan.mutate()
-        },
+        startScan,
         scanning: meta.data?.last_scan?.running ?? false,
       }),
-    [meta.data, filters, scan],
+    [meta.data, filters, startScan],
   )
 
   /** What the keys do, and the only description of them there is. */
@@ -185,6 +228,17 @@ export function App() {
         },
       },
       { key: 'c', label: 'copy a clone command', group: 'do', run: copyClone },
+      {
+        key: 'x',
+        label: 'dismiss, or hold to dismiss a run of them',
+        group: 'decide',
+        // Held on purpose: a run of dismissals is one decision and comes back
+        // under one undo.
+        repeats: true,
+        run: dismiss,
+      },
+      { key: 's', label: 'shortlist', group: 'decide', run: shortlist },
+      { key: 'u', label: 'undo the last decision', group: 'decide', run: undo },
       ...VIEW_ORDER.map((name, i) => ({
         key: String(i + 1),
         label:
@@ -229,7 +283,17 @@ export function App() {
         },
       },
     ],
-    [move, last, openOnGitHub, copyClone, search, meta.data],
+    [
+      move,
+      last,
+      openOnGitHub,
+      copyClone,
+      search,
+      meta.data,
+      dismiss,
+      shortlist,
+      undo,
+    ],
   )
 
   /** While an overlay is up it is the only thing the keyboard is talking to. */
@@ -258,6 +322,9 @@ export function App() {
 
   useKeymap(overlay === null ? bindings : closing)
 
+  // Nothing to show, and nothing on its way: the quiet state, not a blank pane.
+  const quiet = rows.length === 0 && !listing.isPending && !listing.isError
+
   return (
     <div className="flex h-full flex-col">
       <StatusLine
@@ -276,25 +343,44 @@ export function App() {
           expanded ? 'grid-cols-1' : 'grid-cols-[minmax(0,60fr)_minmax(0,40fr)]'
         }`}
       >
-        {!expanded && (
-          <BountyList
-            rows={rows}
-            selected={selected}
-            onSelect={setSelected}
-            nowMs={nowMs}
-            hasNextPage={listing.hasNextPage}
-            isFetchingNextPage={listing.isFetchingNextPage}
-            fetchNextPage={nextPage}
-          />
-        )}
+        {!expanded &&
+          (quiet ? (
+            <Quiet
+              meta={meta.data}
+              view={meta.data?.views.find((candidate) => candidate.name === view)}
+              filtered={Object.keys(filters).length > 0}
+              nowMs={nowMs}
+              onScan={startScan}
+              onShowEverything={() => {
+                setView('all')
+              }}
+              onClearFilters={() => {
+                setFilters({})
+              }}
+            />
+          ) : (
+            <BountyList
+              rows={rows}
+              selected={selected}
+              onSelect={setSelected}
+              nowMs={nowMs}
+              leaving={leaving}
+              hasNextPage={listing.hasNextPage}
+              isFetchingNextPage={listing.isFetchingNextPage}
+              fetchNextPage={nextPage}
+            />
+          ))}
         <Detail
           row={current}
           nowMs={nowMs}
           onOpen={openOnGitHub}
+          onShortlist={shortlist}
+          onDismiss={dismiss}
           onCopyClone={copyClone}
           copied={copied}
         />
       </div>
+      <UndoNotice notice={notice} onUndo={undo} onClose={dismissNotice} />
       {overlay === 'help' && <HelpSheet bindings={bindings} />}
       {overlay === 'command' && (
         <CommandPalette

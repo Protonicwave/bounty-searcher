@@ -28,7 +28,7 @@ function grouped(bindings: Binding[]): [string, Binding[]][] {
 export function HelpSheet({ bindings }: { bindings: Binding[] }) {
   return (
     <Overlay title="KEYS">
-      <div className="scrollbar-thin max-h-[56vh] overflow-y-auto px-[14px] py-[12px]">
+      <div className="scrollbar-thin max-h-[72vh] overflow-y-auto px-[14px] py-[12px]">
         {grouped(bindings).map(([group, keys]) => (
           <div key={group} className="mb-[14px]">
             <div className="mb-[6px] text-xs text-fg-dimmer">{group}</div>

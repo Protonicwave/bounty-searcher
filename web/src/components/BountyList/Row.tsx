@@ -12,6 +12,8 @@ interface Props {
   selected: boolean
   /** Frozen between ticks, so an age cannot re-render a row on its own. */
   nowMs: number
+  /** Decided about, and on its way out. The only movement in the interface. */
+  leaving: boolean
   onSelect: (index: number) => void
 }
 
@@ -33,6 +35,7 @@ export const Row = memo(function Row({
   index,
   selected,
   nowMs,
+  leaving,
   onSelect,
 }: Props) {
   // Demotion by subtraction: less contrast, never a red badge.
@@ -40,93 +43,99 @@ export const Row = memo(function Row({
   const now = new Date(nowMs)
 
   return (
+    // The outer element carries the height, so the inner one can keep its
+    // padding while it collapses. Nothing else in the interface moves.
     <div
-      // Selecting on mouse down rather than click, because the mouse is the
-      // fallback here and a fallback should still feel immediate.
-      onMouseDown={() => {
-        onSelect(index)
-      }}
-      className={`relative grid h-row grid-cols-[76px_26px_62px_minmax(0,1fr)] items-start gap-[12px] border-b border-line-soft py-[9px] pr-[14px] pl-[12px] ${
-        selected ? 'bg-accent-bg' : 'bg-transparent'
+      className={`overflow-hidden transition-[height,opacity] duration-150 ${
+        leaving ? 'h-0 opacity-0' : 'h-row'
       }`}
     >
-      {/* Selection is a gutter bar, never a border box: boxes fight the rules. */}
-      <span
-        className={`absolute top-0 bottom-0 left-0 w-[2px] ${
-          selected ? 'bg-accent' : 'bg-transparent'
-        }`}
-      />
-      {row.is_new && (
-        <span className="absolute top-[14px] left-[5px] h-[3px] w-[3px] bg-accent" />
-      )}
-
-      <span className={muted ? 'opacity-40' : undefined}>
-        <ScoreRail total={row.score.total} components={row.score.components} />
-      </span>
-
-      <span className={`text-right ${muted ? 'text-fg-dim' : 'text-fg'}`}>
-        {Math.round(row.score.total)}
-      </span>
-
-      <span
-        className={`text-right ${
-          row.amount === null
-            ? 'text-fg-dimmer'
-            : row.suspect_reason !== null
-              ? 'text-fg-dimmer line-through'
-              : muted
-                ? 'text-fg-dim'
-                : 'text-fg'
+      <div
+        // Selecting on mouse down rather than click, because the mouse is the
+        // fallback here and a fallback should still feel immediate.
+        onMouseDown={() => {
+          onSelect(index)
+        }}
+        className={`relative grid h-row grid-cols-[76px_26px_62px_minmax(0,1fr)] items-start gap-[12px] border-b border-line-soft py-[9px] pr-[14px] pl-[12px] ${
+          selected ? 'bg-accent-bg' : 'bg-transparent'
         }`}
       >
-        {row.amount === null
-          ? '?'
-          : formatMoney(row.amount.minor_units, row.amount.currency)}
-      </span>
+        {/* Selection is a gutter bar, never a border box: boxes fight the rules. */}
+        <span
+          className={`absolute top-0 bottom-0 left-0 w-[2px] ${
+            selected ? 'bg-accent' : 'bg-transparent'
+          }`}
+        />
+        {row.is_new && (
+          <span className="absolute top-[14px] left-[5px] h-[3px] w-[3px] bg-accent" />
+        )}
 
-      <span className="min-w-0">
-        <span className="flex min-w-0 items-baseline gap-[8px]">
-          <span className={`flex-none ${muted ? 'text-fg-dimmer' : 'text-fg-dim'}`}>
-            {row.repo}
+        <span className={muted ? 'opacity-40' : undefined}>
+          <ScoreRail total={row.score.total} components={row.score.components} />
+        </span>
+
+        <span className={`text-right ${muted ? 'text-fg-dim' : 'text-fg'}`}>
+          {Math.round(row.score.total)}
+        </span>
+
+        <span
+          className={`text-right ${
+            row.amount === null
+              ? 'text-fg-dimmer'
+              : row.suspect_reason !== null
+                ? 'text-fg-dimmer line-through'
+                : muted
+                  ? 'text-fg-dim'
+                  : 'text-fg'
+          }`}
+        >
+          {row.amount === null
+            ? '?'
+            : formatMoney(row.amount.minor_units, row.amount.currency)}
+        </span>
+
+        <span className="min-w-0">
+          <span className="flex min-w-0 items-baseline gap-[8px]">
+            <span className={`flex-none ${muted ? 'text-fg-dimmer' : 'text-fg-dim'}`}>
+              {row.repo}
+            </span>
+            <span className={`fade-right min-w-0 ${muted ? 'text-fg-dim' : 'text-fg'}`}>
+              {row.title}
+            </span>
           </span>
-          <span
-            className={`fade-right min-w-0 ${muted ? 'text-fg-dim' : 'text-fg'}`}
-          >
-            {row.title}
+          <span className="mt-[3px] flex gap-[12px] text-xs text-fg-dimmer">
+            {row.language !== null && (
+              <>
+                <span>{row.language}</span>
+                <Dot />
+              </>
+            )}
+            <span>{formatAge(row.created_at, now)}</span>
+            <Dot />
+            <span>{row.comments} cmt</span>
+            {row.stars !== null && (
+              <>
+                <Dot />
+                <span>{formatCount(row.stars)}</span>
+              </>
+            )}
+            {row.claim_reason !== null && (
+              <>
+                <Dot />
+                <span className="border border-line px-[4px]">claimed</span>
+              </>
+            )}
+            {row.suspect_reason !== null && (
+              <>
+                <Dot />
+                <span className="border border-line px-[4px]">
+                  suspect: {row.suspect_reason}
+                </span>
+              </>
+            )}
           </span>
         </span>
-        <span className="mt-[3px] flex gap-[12px] text-xs text-fg-dimmer">
-          {row.language !== null && (
-            <>
-              <span>{row.language}</span>
-              <Dot />
-            </>
-          )}
-          <span>{formatAge(row.created_at, now)}</span>
-          <Dot />
-          <span>{row.comments} cmt</span>
-          {row.stars !== null && (
-            <>
-              <Dot />
-              <span>{formatCount(row.stars)}</span>
-            </>
-          )}
-          {row.claim_reason !== null && (
-            <>
-              <Dot />
-              <span className="border border-line px-[4px]">claimed</span>
-            </>
-          )}
-          {row.suspect_reason !== null && (
-            <>
-              <Dot />
-              <span className="border border-line px-[4px]">
-                suspect: {row.suspect_reason}
-              </span>
-            </>
-          )}
-        </span>
-      </span>
+      </div>
     </div>
   )
 })

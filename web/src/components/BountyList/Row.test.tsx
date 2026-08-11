@@ -11,7 +11,11 @@ afterEach(cleanup)
 
 const NOW = Date.parse('2026-06-06T12:00:00Z')
 
-function draw(over: Parameters<typeof row>[0] = {}, selected = false) {
+function draw(
+  over: Parameters<typeof row>[0] = {},
+  selected = false,
+  leaving = false,
+) {
   const onSelect = vi.fn()
   const { container } = render(
     <Row
@@ -19,6 +23,7 @@ function draw(over: Parameters<typeof row>[0] = {}, selected = false) {
       index={3}
       selected={selected}
       nowMs={NOW}
+      leaving={leaving}
       onSelect={onSelect}
     />,
   )
@@ -69,9 +74,16 @@ describe('Row', () => {
 
   it('reports which row was pressed, so the mouse still works', () => {
     const { container, onSelect } = draw()
-    const element = container.firstElementChild
+    const element = container.querySelector('.grid')
     element?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
     expect(onSelect).toHaveBeenCalledWith(3)
+  })
+
+  it('collapses to nothing once it has been decided about', () => {
+    const { container } = draw({}, false, true)
+    const outer = container.firstElementChild
+    expect(outer?.className).toContain('h-0')
+    expect(outer?.className).toContain('duration-150')
   })
 
   it('draws six segments whatever the score is made of', () => {

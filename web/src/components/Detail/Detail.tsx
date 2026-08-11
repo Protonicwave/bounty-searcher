@@ -15,6 +15,8 @@ interface Props {
   row: BountyRow | undefined
   nowMs: number
   onOpen: () => void
+  onShortlist: () => void
+  onDismiss: () => void
   onCopyClone: () => void
   /** What the copy action last did, shown in its place for a moment. */
   copied: boolean
@@ -27,7 +29,15 @@ interface Props {
  * The heading and the score are drawn from the list row, which is already in
  * hand, so moving the selection never blanks the pane while a body loads.
  */
-export function Detail({ row, nowMs, onOpen, onCopyClone, copied }: Props) {
+export function Detail({
+  row,
+  nowMs,
+  onOpen,
+  onShortlist,
+  onDismiss,
+  onCopyClone,
+  copied,
+}: Props) {
   const detail = useBounty(row?.id ?? null)
 
   if (!row) {
@@ -36,6 +46,12 @@ export function Detail({ row, nowMs, onOpen, onCopyClone, copied }: Props) {
 
   const actions: Action[] = [
     { label: 'Open on GitHub', hint: 'enter', primary: true, onClick: onOpen },
+    {
+      label: row.triage.status === 'shortlisted' ? 'Shortlisted' : 'Shortlist',
+      hint: 's',
+      onClick: onShortlist,
+    },
+    { label: 'Dismiss', hint: 'x', onClick: onDismiss },
     { label: copied ? 'Copied' : 'Copy clone', hint: 'c', onClick: onCopyClone },
   ]
 

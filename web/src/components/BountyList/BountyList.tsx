@@ -33,6 +33,8 @@ interface Props {
   selected: number
   onSelect: (index: number) => void
   nowMs: number
+  /** Which rows have been decided about and are on their way out. */
+  leaving: ReadonlySet<number>
   hasNextPage: boolean
   isFetchingNextPage: boolean
   fetchNextPage: () => void
@@ -51,6 +53,7 @@ export function BountyList({
   selected,
   onSelect,
   nowMs,
+  leaving,
   hasNextPage,
   isFetchingNextPage,
   fetchNextPage,
@@ -103,6 +106,7 @@ export function BountyList({
                 index={item.index}
                 selected={item.index === selected}
                 nowMs={nowMs}
+                leaving={leaving.has(row.id)}
                 onSelect={onSelect}
               />
             ) : null
