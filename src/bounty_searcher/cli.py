@@ -13,11 +13,17 @@ import asyncio
 import logging
 import os
 import sys
-from dataclasses import fields, replace
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
-from .config import ConfigError, ScanSettings, load_config, scan_settings
+from .config import (
+    ConfigError,
+    ScanSettings,
+    load_config,
+    scan_settings,
+    score_weights,
+)
 from .domain.models import MINOR_UNIT_EXPONENT, ScoredBounty
 from .domain.scoring import ScoreWeights
 from .domain.select import cap_per_repo
@@ -135,17 +141,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--token", default=None, help="GitHub token (or set GITHUB_TOKEN)")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
-
-
-def weights_from(config: dict[str, Any], languages: tuple[str, ...]) -> ScoreWeights:
-    known = {f.name for f in fields(ScoreWeights)}
-    overrides = {
-        key: value
-        for key, value in (config.get("scoring") or {}).items()
-        if key in known
-    }
-    overrides["preferred_languages"] = languages
-    return ScoreWeights(**overrides)
 
 
 def filters_from(
@@ -308,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
 
     search = config.get("search") or {}
     per_repo = args.per_repo if args.per_repo is not None else search.get("per_repo", 3)
-    weights = weights_from(config, settings.languages)
+    weights = score_weights(config, settings.languages)
 
     # The clock is read once, here at the edge, and passed down. Everything
     # below scores and filters against this moment rather than its own.

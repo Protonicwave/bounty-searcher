@@ -10,9 +10,11 @@ silently narrowing the corpus.
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
+
+from .domain.scoring import ScoreWeights
 
 CONFIG_LOCATIONS = (
     Path("config.toml"),
@@ -121,3 +123,21 @@ def scan_settings(
         watch_comments=bool(table.get("watch_comments", defaults.watch_comments)),
         workers=int(table.get("workers", defaults.workers)),
     )
+
+
+def score_weights(
+    config: dict[str, Any], languages: tuple[str, ...] = ()
+) -> ScoreWeights:
+    """Build the scoring weights, ignoring any key the scorer does not have.
+
+    Lives here rather than with either entry point, because the command line
+    and the interface have to score the corpus the same way.
+    """
+    known = {f.name for f in fields(ScoreWeights)}
+    overrides = {
+        key: value
+        for key, value in (config.get("scoring") or {}).items()
+        if key in known
+    }
+    overrides["preferred_languages"] = languages
+    return ScoreWeights(**overrides)
