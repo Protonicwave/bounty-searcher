@@ -89,8 +89,7 @@ def within_budget(timings: list[float]) -> None:
     """Assert the median, and say where the tail sat when it fails."""
     median = statistics.median(timings)
     assert median < LIST_BUDGET_MS, (
-        f"median {median:.1f}ms, p95 {p95(timings):.1f}ms,"
-        f" slowest {max(timings):.1f}ms"
+        f"median {median:.1f}ms, p95 {p95(timings):.1f}ms, slowest {max(timings):.1f}ms"
     )
 
 
