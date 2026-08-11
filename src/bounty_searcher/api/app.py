@@ -5,13 +5,15 @@ configuration file and consults no environment, which is what lets a test build
 one over a temporary corpus in a line and the launcher build the real one over
 the real corpus in another.
 
-Serving the built interface as static files belongs with packaging, not here.
+That includes the built interface: where it is on disk is the launcher's
+business, and an application without one is still the whole API.
 """
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 
@@ -22,6 +24,7 @@ from ..store.db import Database
 from .routes import bounties, meta, scan, triage
 from .scan import ScanSupervisor, Sweep
 from .state import AppState, Clock, utc_now
+from .static import interface_files
 
 API_PREFIX = "/api"
 
@@ -34,8 +37,13 @@ def create_app(
     token: str | None = None,
     clock: Clock = utc_now,
     sweep: Sweep | None = None,
+    interface: Path | None = None,
 ) -> FastAPI:
-    """Build the application over an open corpus."""
+    """Build the application over an open corpus.
+
+    Given a built interface, serve it too. Without one this is the API alone,
+    which is what the tests and the development server want.
+    """
     supervisor = ScanSupervisor(
         db,
         settings=settings or ScanSettings(),
@@ -65,5 +73,10 @@ def create_app(
 
     for router in (bounties.router, triage.router, scan.router, meta.router):
         app.include_router(router, prefix=API_PREFIX)
+
+    # Mounted last and at the root, so it is reached only by a request no route
+    # above it claimed.
+    if interface is not None:
+        app.mount("/", interface_files(interface), name="interface")
 
     return app
