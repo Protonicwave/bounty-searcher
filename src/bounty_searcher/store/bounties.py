@@ -161,6 +161,11 @@ class BountyFilter:
     # Only what the corpus first saw at or after this moment, which is what
     # "new since the last scan" means once the corpus is the record.
     first_seen_after: datetime | None = None
+    # The other half of that pair: only what the corpus already held before a
+    # moment. With `changed_after` it says "something moved on a bounty I have
+    # already seen", which is a different thing to notice than a new one.
+    first_seen_before: datetime | None = None
+    changed_after: datetime | None = None
     min_score: float | None = None
     statuses: tuple[TriageStatus, ...] = ()
     text: str | None = None
@@ -486,6 +491,8 @@ def _scored_from_row(row: sqlite3.Row, body: str = "") -> ScoredBounty:
         suspect_reason=row["suspect_reason"],
         triage=_triage_from_row(row),
         bounty_id=row["id"],
+        first_seen_at=from_ts(row["first_seen_at"]),
+        changed_at=from_ts(row["changed_at"]),
     )
 
 
@@ -538,6 +545,12 @@ def _where(filters: BountyFilter, as_of: datetime) -> tuple[list[str], list[obje
     if filters.first_seen_after is not None:
         clauses.append("b.first_seen_at >= ?")
         params.append(to_ts(filters.first_seen_after))
+    if filters.first_seen_before is not None:
+        clauses.append("b.first_seen_at < ?")
+        params.append(to_ts(filters.first_seen_before))
+    if filters.changed_after is not None:
+        clauses.append("b.changed_at >= ?")
+        params.append(to_ts(filters.changed_after))
     if filters.statuses:
         placeholders = ", ".join("?" * len(filters.statuses))
         clauses.append(f"{_STATUS_EXPR} IN ({placeholders})")
@@ -618,6 +631,38 @@ def keys_first_seen_after(conn: sqlite3.Connection, moment: datetime) -> set[str
             (to_ts(moment),),
         )
     }
+
+
+@dataclass(frozen=True, slots=True)
+class CorpusCounts:
+    """What the corpus holds, for the status line."""
+
+    total: int
+    priced: int
+    suspect: int
+    # Keyed by effective status, so an expired snooze is counted as new.
+    by_status: dict[TriageStatus, int]
+
+
+def counts(conn: sqlite3.Connection, as_of: datetime) -> CorpusCounts:
+    """Corpus totals, in one pass rather than one query per number."""
+    row = conn.execute(
+        "SELECT COUNT(*) AS total,"  # noqa: S608 - fixed expression
+        " SUM(b.amount_minor IS NOT NULL) AS priced,"
+        f" SUM(s.suspect_reason IS NOT NULL) AS suspect {_FROM}"
+    ).fetchone()
+
+    grouped = conn.execute(
+        f"SELECT {_STATUS_EXPR} AS effective, COUNT(*) AS n"  # noqa: S608
+        f" {_FROM} GROUP BY effective",
+        (to_ts(as_of),),
+    )
+    return CorpusCounts(
+        total=row["total"],
+        priced=row["priced"] or 0,
+        suspect=row["suspect"] or 0,
+        by_status={TriageStatus(item["effective"]): item["n"] for item in grouped},
+    )
 
 
 def forget_all(conn: sqlite3.Connection) -> int:

@@ -221,13 +221,20 @@ class Bounty:
 
 @dataclass(frozen=True, slots=True)
 class ScoredBounty:
-    """A bounty with its score, and the reason to distrust it if there is one."""
+    """A bounty with its score, and the reason to distrust it if there is one.
+
+    The last three fields are what the corpus knows and the issue does not:
+    which row this is, when it first turned up, and when it last moved. They
+    are None for a bounty that has been scored but not yet stored.
+    """
 
     bounty: Bounty
     score: ScoreBreakdown
     suspect_reason: str | None = None
     triage: Triage = Triage()
     bounty_id: int | None = None
+    first_seen_at: datetime | None = None
+    changed_at: datetime | None = None
 
     @property
     def suspect(self) -> bool:

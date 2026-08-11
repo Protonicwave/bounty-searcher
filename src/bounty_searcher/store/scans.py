@@ -90,6 +90,20 @@ def latest_run(conn: sqlite3.Connection) -> ScanRun | None:
     return None if row is None else _run_from_row(row)
 
 
+def last_completed_run(conn: sqlite3.Connection) -> ScanRun | None:
+    """The most recent run that finished cleanly.
+
+    What "new" and "changed" are measured against. A run that failed or was
+    interrupted covered an unknown fraction of the plan, so comparing against
+    it would mark an arbitrary slice of the corpus as fresh.
+    """
+    row = conn.execute(
+        "SELECT * FROM scan_run WHERE status = ? ORDER BY id DESC LIMIT 1",
+        (RunStatus.DONE.value,),
+    ).fetchone()
+    return None if row is None else _run_from_row(row)
+
+
 def start_query(
     conn: sqlite3.Connection, run_id: int, source: str, query: str, now: datetime
 ) -> int:

@@ -5,19 +5,21 @@ from pathlib import Path
 
 import pytest
 
-from bounty_searcher.domain.models import AmountField
+from bounty_searcher.domain.models import AmountField, TriageStatus
 from bounty_searcher.domain.scoring import ScoreWeights
 from bounty_searcher.store.bounties import (
     BountyFilter,
     Cursor,
     SortKey,
     content_hash,
+    counts,
     get,
     list_bounties,
     score_bounties,
     upsert_many,
 )
 from bounty_searcher.store.db import Database, to_ts
+from bounty_searcher.store.triage import set_status
 from tests.domain.builders import amount
 from tests.store.corpus import NOW, WEIGHTS, bounty, fill
 
@@ -314,3 +316,37 @@ def test_filters_combine(conn: sqlite3.Connection) -> None:
 def test_a_cursor_survives_being_encoded(conn: sqlite3.Connection) -> None:
     cursor = Cursor(61.5, 42)
     assert Cursor.decode(cursor.encode()) == cursor
+
+
+def test_rows_carry_when_the_corpus_first_saw_them(conn: sqlite3.Connection) -> None:
+    """The interface marks a new row, so the read has to say when it arrived."""
+    fill(conn, [bounty(1)])
+    later = NOW + timedelta(days=1)
+    fill(conn, [bounty(1, title="Retitled"), bounty(2)], later)
+
+    rows = {r.bounty.number: r for r in list_bounties(conn, as_of=later).rows}
+    assert rows[1].first_seen_at == NOW
+    assert rows[1].changed_at == later
+    assert rows[2].first_seen_at == later
+
+
+def test_counts_describe_the_whole_corpus(conn: sqlite3.Connection) -> None:
+    ids = fill(conn, [bounty(1), bounty(2, amount=None), bounty(3, stars=0)])
+    set_status(conn, [ids[0]], TriageStatus.SHORTLISTED, NOW)
+
+    totals = counts(conn, NOW)
+    assert (totals.total, totals.priced, totals.suspect) == (3, 2, 1)
+    assert totals.by_status == {
+        TriageStatus.SHORTLISTED: 1,
+        TriageStatus.NEW: 2,
+    }
+
+
+def test_an_expired_snooze_is_counted_as_new_again(conn: sqlite3.Connection) -> None:
+    ids = fill(conn, [bounty(1)])
+    set_status(
+        conn, list(ids), TriageStatus.SNOOZED, NOW, snooze_until=NOW + timedelta(days=1)
+    )
+
+    assert counts(conn, NOW).by_status == {TriageStatus.SNOOZED: 1}
+    assert counts(conn, NOW + timedelta(days=2)).by_status == {TriageStatus.NEW: 1}

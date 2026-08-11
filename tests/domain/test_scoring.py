@@ -1,7 +1,12 @@
 from datetime import timedelta
 
 from bounty_searcher.domain.models import Bounty, ScoreComponent
-from bounty_searcher.domain.scoring import ScoreWeights, score, weights_hash
+from bounty_searcher.domain.scoring import (
+    ScoreWeights,
+    component_maxima,
+    score,
+    weights_hash,
+)
 from tests.domain.builders import NOW, amount, bounty
 
 WEIGHTS = ScoreWeights(preferred_languages=("typescript",))
@@ -111,3 +116,16 @@ def test_weights_hash_tracks_the_weights() -> None:
 
 def test_the_hash_is_carried_on_the_breakdown() -> None:
     assert score(bounty(), WEIGHTS, NOW).weights_hash == weights_hash(WEIGHTS)
+
+
+def test_the_maxima_on_a_breakdown_are_the_ones_published() -> None:
+    """One definition, so a rail drawn to scale agrees with the score it drew."""
+    breakdown = score(bounty(), WEIGHTS, NOW)
+    maxima = component_maxima(WEIGHTS)
+
+    assert {part.component: part.maximum for part in breakdown.components} == maxima
+
+
+def test_language_can_only_score_when_a_language_is_preferred() -> None:
+    assert component_maxima(ScoreWeights())[ScoreComponent.LANGUAGE] == 0.0
+    assert component_maxima(WEIGHTS)[ScoreComponent.LANGUAGE] > 0.0

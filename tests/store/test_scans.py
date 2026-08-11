@@ -128,3 +128,21 @@ def test_queries_go_when_their_run_does(conn: sqlite3.Connection) -> None:
     conn.execute("DELETE FROM scan_run WHERE id = ?", (run_id,))
 
     assert conn.execute("SELECT COUNT(*) FROM scan_query").fetchone()[0] == 0
+
+
+def test_only_a_clean_finish_counts_as_completed(conn: sqlite3.Connection) -> None:
+    """An interrupted run covered an unknown fraction, so it is not a baseline."""
+    done = scans.start_run(conn, NOW - timedelta(days=1), planned_queries=1)
+    scans.finish_run(conn, done, NOW - timedelta(days=1), scans.RunStatus.DONE)
+
+    stopped = scans.start_run(conn, NOW, planned_queries=1)
+    scans.finish_run(conn, stopped, NOW, scans.RunStatus.INTERRUPTED)
+
+    completed = scans.last_completed_run(conn)
+    assert completed is not None and completed.id == done
+
+
+def test_there_is_no_completed_run_before_the_first_scan(
+    conn: sqlite3.Connection,
+) -> None:
+    assert scans.last_completed_run(conn) is None

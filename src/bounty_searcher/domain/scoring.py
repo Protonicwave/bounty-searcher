@@ -169,6 +169,25 @@ def _repository(b: Bounty, w: ScoreWeights) -> float:
     return value
 
 
+def component_maxima(w: ScoreWeights) -> dict[ScoreComponent, float]:
+    """The best each component could manage for a perfect bounty.
+
+    A property of the weights and not of any one bounty, so it is not stored
+    per row. Whoever draws a segment to scale, or writes "9 of a possible 15",
+    asks here.
+    """
+    return {
+        ScoreComponent.PAYOUT: w.payout_max,
+        ScoreComponent.LANGUAGE: w.language_match if w.preferred_languages else 0.0,
+        ScoreComponent.EFFORT: w.low_effort + w.help_wanted,
+        ScoreComponent.FRESHNESS: w.freshness_max,
+        # Competition and repository size can only ever cost you, apart from
+        # the sweet-spot bonus.
+        ScoreComponent.COMPETITION: 0.0,
+        ScoreComponent.REPOSITORY: w.sweet_spot_bonus,
+    }
+
+
 def score(
     b: Bounty, w: ScoreWeights, as_of: datetime, *, suspect: bool = False
 ) -> ScoreBreakdown:
@@ -178,22 +197,18 @@ def score(
     earns nothing, so the caller has to have made that judgement first.
     """
     values = {
-        ScoreComponent.PAYOUT: (_payout(b, w, suspect), w.payout_max),
-        ScoreComponent.LANGUAGE: (
-            _language(b, w),
-            w.language_match if w.preferred_languages else 0.0,
-        ),
-        ScoreComponent.EFFORT: (_effort(b, w), w.low_effort + w.help_wanted),
-        ScoreComponent.FRESHNESS: (_freshness(b, w, as_of), w.freshness_max),
-        # Competition and repository size can only ever cost you, apart from
-        # the sweet-spot bonus.
-        ScoreComponent.COMPETITION: (_competition(b, w), 0.0),
-        ScoreComponent.REPOSITORY: (_repository(b, w), w.sweet_spot_bonus),
+        ScoreComponent.PAYOUT: _payout(b, w, suspect),
+        ScoreComponent.LANGUAGE: _language(b, w),
+        ScoreComponent.EFFORT: _effort(b, w),
+        ScoreComponent.FRESHNESS: _freshness(b, w, as_of),
+        ScoreComponent.COMPETITION: _competition(b, w),
+        ScoreComponent.REPOSITORY: _repository(b, w),
     }
 
+    maxima = component_maxima(w)
     components = tuple(
-        ComponentScore(component, value, maximum)
-        for component, (value, maximum) in values.items()
+        ComponentScore(component, value, maxima[component])
+        for component, value in values.items()
     )
     total = BASE_SCORE + sum(part.value for part in components)
 
