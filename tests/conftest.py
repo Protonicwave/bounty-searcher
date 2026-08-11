@@ -18,6 +18,20 @@ from tests.store.corpus import NOW, WEIGHTS, bounty
 
 CORPUS_SIZE = 50_000
 
+# Titles vary, because a corpus where every row reads the same makes the text
+# index degenerate: any term at all matches all fifty thousand rows, and a
+# measurement over that says more about the fixture than about the query.
+_SUBJECTS = (
+    "pagination cursor",
+    "flaky integration test",
+    "memory leak in the worker",
+    "dark mode contrast",
+    "webhook retry backoff",
+    "unicode filenames on windows",
+    "stale cache after deploy",
+)
+_VERBS = ("fix", "handle", "investigate", "document", "rework")
+
 
 @pytest.fixture(scope="session")
 def large_corpus(tmp_path_factory: pytest.TempPathFactory) -> Path:
@@ -29,6 +43,10 @@ def large_corpus(tmp_path_factory: pytest.TempPathFactory) -> Path:
             [
                 bounty(
                     n,
+                    title=(
+                        f"{_VERBS[n % len(_VERBS)]}"
+                        f" {_SUBJECTS[n % len(_SUBJECTS)]} ({n})"
+                    ),
                     repo=f"owner{n % 700}/repo",
                     language=("Rust", "TypeScript", "Go", None)[n % 4],
                     stars=(n * 7) % 40_000,

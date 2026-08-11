@@ -689,24 +689,47 @@ class CorpusCounts:
     by_status: dict[TriageStatus, int]
 
 
-def counts(conn: sqlite3.Connection, as_of: datetime) -> CorpusCounts:
-    """Corpus totals, in one pass rather than one query per number."""
-    row = conn.execute(
-        "SELECT COUNT(*) AS total,"  # noqa: S608 - fixed expression
-        " SUM(b.amount_minor IS NOT NULL) AS priced,"
-        f" SUM(s.suspect_reason IS NOT NULL) AS suspect {_FROM}"
-    ).fetchone()
+# Statuses are grouped from the triage table alone. Only a bounty you have
+# decided about has a row there, so this reads a handful of rows rather than the
+# whole corpus, and everything untouched is counted as new by subtraction.
+_STATUS_COUNTS = f"""
+SELECT CASE
+           WHEN t.status = 'snoozed' AND COALESCE(t.snooze_until, 0) <= ?
+           THEN '{TriageStatus.NEW.value}'
+           ELSE t.status
+       END AS effective,
+       COUNT(*) AS n
+FROM triage t
+GROUP BY effective
+"""
 
-    grouped = conn.execute(
-        f"SELECT {_STATUS_EXPR} AS effective, COUNT(*) AS n"  # noqa: S608
-        f" {_FROM} GROUP BY effective",
-        (to_ts(as_of),),
-    )
+
+def counts(conn: sqlite3.Connection, as_of: datetime) -> CorpusCounts:
+    """Corpus totals, for the status line.
+
+    Every number here is an aggregate over one table. Joining the corpus to its
+    scores and its triage to count it was two scans of fifty thousand rows on a
+    request the status line makes on every change.
+    """
+    row = conn.execute(
+        "SELECT COUNT(*) AS total, COALESCE(SUM(amount_minor IS NOT NULL), 0)"
+        " AS priced FROM bounty"
+    ).fetchone()
+    suspect = conn.execute(
+        "SELECT COUNT(*) AS n FROM bounty_score WHERE suspect_reason IS NOT NULL"
+    ).fetchone()["n"]
+
+    decided: dict[TriageStatus, int] = {}
+    for item in conn.execute(_STATUS_COUNTS, (to_ts(as_of),)):
+        status = TriageStatus(item["effective"])
+        decided[status] = decided.get(status, 0) + item["n"]
+
+    undecided = row["total"] - sum(decided.values())
+    if undecided > 0:
+        decided[TriageStatus.NEW] = decided.get(TriageStatus.NEW, 0) + undecided
+
     return CorpusCounts(
-        total=row["total"],
-        priced=row["priced"] or 0,
-        suspect=row["suspect"] or 0,
-        by_status={TriageStatus(item["effective"]): item["n"] for item in grouped},
+        total=row["total"], priced=row["priced"], suspect=suspect, by_status=decided
     )
 
 
