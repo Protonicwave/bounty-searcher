@@ -27,15 +27,9 @@ from datetime import date, timedelta
 
 from ..config import ScanSettings
 from ..sources.base import SourceQuery
+from ..sources.github.search import NAME as SEARCH_SOURCE
 
 log = logging.getLogger(__name__)
-
-SEARCH_SOURCE = "github-search"
-
-# GitHub returns 100 results a page and stops at 1,000.
-RESULTS_PER_PAGE = 100
-MAX_RESULTS_PER_QUERY = 1_000
-MAX_PAGES = MAX_RESULTS_PER_QUERY // RESULTS_PER_PAGE
 
 # Most queries in a monthly window return well under a page. Refinements only
 # exist because their parent saturated, so they are expected to cost more.
