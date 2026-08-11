@@ -134,8 +134,11 @@ def score_weights(
     and the interface have to score the corpus the same way.
     """
     known = {f.name for f in fields(ScoreWeights)}
-    overrides = {
-        key: value
+    overrides: dict[str, Any] = {
+        # TOML has arrays where the weights have tuples, and the weights are
+        # hashed to stamp every score. A list would be unhashable and take the
+        # whole scoring pass down with it.
+        key: tuple(value) if isinstance(value, list) else value
         for key, value in (config.get("scoring") or {}).items()
         if key in known
     }

@@ -11,7 +11,9 @@ from bounty_searcher.config import (
     ConfigError,
     load_config,
     scan_settings,
+    score_weights,
 )
+from bounty_searcher.domain.scoring import weights_hash
 
 
 def write(tmp_path: Path, body: str) -> str:
@@ -79,3 +81,29 @@ def test_a_budget_of_zero_means_no_budget(tmp_path: Path) -> None:
     # A sweep allowed no requests at all is never what anybody wants, so zero
     # is the way to say "plan the lot" in a file that cannot hold a null.
     assert scan_settings(load_config(path)).request_budget == 0
+
+
+def test_the_scoring_table_is_read(tmp_path: Path) -> None:
+    path = write(tmp_path, "[scoring]\npayout_halfway = 150.0\ncredible_stars = 20\n")
+
+    weights = score_weights(load_config(path))
+
+    assert weights.payout_halfway == 150.0
+    assert weights.credible_stars == 20
+
+
+def test_a_key_the_scorer_does_not_have_is_ignored(tmp_path: Path) -> None:
+    path = write(tmp_path, "[scoring]\nnot_a_weight = 1\n")
+
+    assert score_weights(load_config(path)) == score_weights({})
+
+
+def test_an_array_weight_survives_being_hashed(tmp_path: Path) -> None:
+    # The weights are hashed to stamp every score, and TOML has arrays where
+    # the weights have tuples. Read straight through, the scoring pass dies.
+    path = write(tmp_path, "[scoring]\nsweet_spot_stars = [200, 30000]\n")
+
+    weights = score_weights(load_config(path))
+
+    assert weights.sweet_spot_stars == (200, 30000)
+    assert weights_hash(weights)
