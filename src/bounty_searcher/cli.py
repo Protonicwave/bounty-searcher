@@ -30,15 +30,10 @@ from .render import (
 )
 from .scan.planner import Planner
 from .scan.runner import ScanOutcome, ScanProgress, run_scan
-from .sources.base import Source
+from .scan.sources import build_sources
 from .sources.github.client import GitHubClient, RateLimited
-from .sources.github.comments import CommentSource
 from .sources.github.issues import find_claim
-from .sources.github.repos import WatchlistSource
-from .sources.github.search import SearchSource
 from .store import bounties as store_bounties
-from .store import repos as store_repos
-from .store import scans
 from .store.bounties import BountyFilter, SortKey
 from .store.db import Database, default_db_path
 from .store.http_cache import load_etags, save_etags
@@ -196,34 +191,6 @@ def read_corpus(
     )
     kept, dropped = cap_per_repo(list(page.rows), per_repo)
     return kept[:limit], dropped, page.total
-
-
-def build_sources(
-    client: GitHubClient, db: Database, settings: ScanSettings, planner: Planner
-) -> tuple[list[Source], int]:
-    """Every source a sweep will run, and how many requests it expects to cost."""
-    planned = planner.plan()
-    sources: list[Source] = [
-        SearchSource(client, [query.as_source_query() for query in planned])
-    ]
-    cost = sum(query.pages for query in planned)
-
-    previous = scans.latest_run(db.conn)
-    since = (
-        previous.finished_at
-        if previous is not None and previous.status is scans.RunStatus.DONE
-        else None
-    )
-
-    watched = store_repos.watchlist(db.conn, settings.watchlist)
-    if watched:
-        sources.append(WatchlistSource(client, watched, since=since))
-        cost += len(watched)
-        if settings.watch_comments:
-            sources.append(CommentSource(client, watched, since=since))
-            cost += 2 * len(watched)
-
-    return sources, cost
 
 
 async def deep_check(
