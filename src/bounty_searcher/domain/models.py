@@ -87,6 +87,21 @@ class Amount:
         return Decimal(self.minor_units).scaleb(-MINOR_UNIT_EXPONENT)
 
 
+@dataclass(frozen=True, slots=True)
+class Repository:
+    """The repository facts that scoring cares about.
+
+    Search results do not carry any of this, so it is fetched once per
+    repository and cached, then copied onto every bounty found there.
+    """
+
+    name: str  # "owner/name"
+    language: str | None = None
+    stars: int | None = None
+    archived: bool = False
+    is_fork: bool = False
+
+
 class TriageStatus(StrEnum):
     NEW = "new"
     SHORTLISTED = "shortlisted"
