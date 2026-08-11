@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { BountyList } from '@/components/BountyList'
+import { Detail } from '@/components/Detail'
 import { StatusLine } from '@/components/StatusLine'
 import { useBounties } from '@/hooks/useBounties'
 import { useMeta } from '@/hooks/useMeta'
@@ -70,7 +71,7 @@ export function App() {
           isFetchingNextPage={listing.isFetchingNextPage}
           fetchNextPage={nextPage}
         />
-        <div className="scrollbar-thin overflow-y-auto bg-surface" />
+        <Detail row={rows[selected]} nowMs={nowMs} />
       </div>
     </div>
   )
