@@ -173,7 +173,8 @@ class Page:
 
 @dataclass(frozen=True, slots=True)
 class UpsertResult:
-    ids: tuple[int, ...]  # in the order the bounties were given
+    # One per distinct bounty, in the order it was first given.
+    ids: tuple[int, ...]
     inserted: int
     changed: int
 
@@ -241,6 +242,35 @@ def _row_values(b: Bounty, stamp: int) -> tuple[object, ...]:
     )
 
 
+# Keys per statement when asking which rows already exist. Two parameters
+# each, well inside any SQLite parameter limit.
+_EXISTS_CHUNK = 400
+
+
+def _already_stored(
+    conn: sqlite3.Connection, bounties: list[Bounty]
+) -> set[tuple[str, int]]:
+    """Which of these the corpus already holds.
+
+    Asked before writing rather than inferred from the timestamps afterwards.
+    A row written a moment ago by another query in the same sweep carries this
+    sweep's timestamp too, so the timestamps cannot tell the two apart, and
+    counting one bounty as two new ones would make the yield figures lie.
+    """
+    keys = [(b.repo, b.number) for b in bounties]
+    found: set[tuple[str, int]] = set()
+    for start in range(0, len(keys), _EXISTS_CHUNK):
+        chunk = keys[start : start + _EXISTS_CHUNK]
+        values = ", ".join("(?, ?)" for _ in chunk)
+        rows = conn.execute(
+            "SELECT repo, number FROM bounty"  # noqa: S608 - placeholders only
+            f" WHERE (repo, number) IN (VALUES {values})",
+            [field for key in chunk for field in key],
+        )
+        found.update((row["repo"], row["number"]) for row in rows)
+    return found
+
+
 def upsert_many(
     conn: sqlite3.Connection, bounties: list[Bounty], now: datetime
 ) -> UpsertResult:
@@ -249,18 +279,25 @@ def upsert_many(
     A row whose material fields differ from the stored ones has its
     ``changed_at`` moved forward, which is what the changed view reads.
     """
+    # The same issue turns up under several queries, and writing it twice must
+    # not count it twice.
+    unique = list({(b.repo, b.number): b for b in bounties}.values())
+    if not unique:
+        return UpsertResult((), 0, 0)
+
+    existing = _already_stored(conn, unique)
     ids: list[int] = []
     inserted = changed = 0
     stamp = to_ts(now)
 
     conn.execute("BEGIN")
     try:
-        for b in bounties:
+        for b in unique:
             row = conn.execute(_UPSERT, _row_values(b, stamp)).fetchone()
             ids.append(row["id"])
-            if row["first_seen_at"] == stamp:
+            if (b.repo, b.number) not in existing:
                 inserted += 1
-            elif row["changed_at"] == stamp:
+            elif row["changed_at"] == stamp and row["first_seen_at"] != stamp:
                 changed += 1
         conn.execute("COMMIT")
     except Exception:

@@ -59,6 +59,13 @@ def finish_run(
     )
 
 
+def set_planned(conn: sqlite3.Connection, run_id: int, planned: int) -> None:
+    """Correct the plan size. A saturated query adds work after the start."""
+    conn.execute(
+        "UPDATE scan_run SET planned_queries = ? WHERE id = ?", (planned, run_id)
+    )
+
+
 def _run_from_row(row: sqlite3.Row) -> ScanRun:
     return ScanRun(
         id=row["id"],
