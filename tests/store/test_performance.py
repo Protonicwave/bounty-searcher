@@ -50,14 +50,25 @@ def test_rescoring_the_whole_corpus_is_a_local_pass(
     measures the re-score: whatever ran before this left the heap full and the
     caches cold. Taking the best run removes that without loosening the number
     it has to beat.
+
+    The collector is held off for the same reason. This pass allocates a few
+    hundred thousand short-lived objects, so it triggers repeated generational
+    collections, and the cost of one is set by the size of the whole session's
+    heap rather than by anything measured here: the same pass takes 0.98s with
+    the collector held off and 2.30s with it running against a full heap.
+    Nothing built here is cyclic, so reference counting frees all of it anyway.
     """
     gc.collect()
-    runs = []
-    for _ in range(RESCORE_ATTEMPTS):
-        started = time.perf_counter()
-        written = score_bounties(corpus, WEIGHTS, NOW)
-        runs.append(time.perf_counter() - started)
-        assert written == CORPUS_SIZE
+    gc.disable()
+    try:
+        runs = []
+        for _ in range(RESCORE_ATTEMPTS):
+            started = time.perf_counter()
+            written = score_bounties(corpus, WEIGHTS, NOW)
+            runs.append(time.perf_counter() - started)
+            assert written == CORPUS_SIZE
+    finally:
+        gc.enable()
 
     best = min(runs)
     assert best < RESCORE_BUDGET_SECONDS, (

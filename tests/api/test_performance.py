@@ -55,7 +55,13 @@ async def client(large_corpus: Path) -> AsyncIterator[httpx.AsyncClient]:
 
 @contextmanager
 def quiet_heap() -> Iterator[None]:
-    """Keep the rest of the session's heap out of the measurement."""
+    """Keep the rest of the session's heap out of the measurement.
+
+    Warm up inside this, never before it. Collecting a full session heap hands
+    pages back that the next allocations have to fault in again, so a warm-up
+    taken beforehand is spent by the collect and the first runs measured are the
+    cold ones.
+    """
     gc.collect()
     gc.disable()
     try:
@@ -68,11 +74,10 @@ async def measure(
     client: httpx.AsyncClient, **params: str | int | float
 ) -> list[float]:
     """Milliseconds per request, after warm-up runs that are not counted."""
-    for _ in range(WARMUP):
-        await client.get("/api/bounties", params=params)
-
     timings = []
     with quiet_heap():
+        for _ in range(WARMUP):
+            await client.get("/api/bounties", params=params)
         for _ in range(REQUESTS):
             started = time.perf_counter()
             response = await client.get("/api/bounties", params=params)
@@ -152,10 +157,9 @@ async def test_paging_deep_stays_inside_the_budget(client: httpx.AsyncClient) ->
     Warmed by walking, because a page taken with a cursor is a different query to
     the first page and warming only the first would leave this shape cold.
     """
-    await _walk(client, WARMUP)
-
     timings: list[float] = []
     with quiet_heap():
+        await _walk(client, WARMUP)
         await _walk(client, REQUESTS, timings)
 
     within_budget(timings)
@@ -163,11 +167,11 @@ async def test_paging_deep_stays_inside_the_budget(client: httpx.AsyncClient) ->
 
 async def test_one_bounty_comes_back_at_once(client: httpx.AsyncClient) -> None:
     row = (await client.get("/api/bounties", params={"limit": 1})).json()["rows"][0]
-    for _ in range(WARMUP):
-        await client.get(f"/api/bounties/{row['id']}")
 
     timings = []
     with quiet_heap():
+        for _ in range(WARMUP):
+            await client.get(f"/api/bounties/{row['id']}")
         for _ in range(REQUESTS):
             started = time.perf_counter()
             response = await client.get(f"/api/bounties/{row['id']}")
