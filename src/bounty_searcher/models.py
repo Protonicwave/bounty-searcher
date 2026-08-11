@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Any
 
 
 @dataclass
@@ -47,14 +48,14 @@ class Bounty:
 
     @property
     def age_days(self) -> float:
-        return (datetime.now(timezone.utc) - self.created_at).total_seconds() / 86400
+        return (datetime.now(UTC) - self.created_at).total_seconds() / 86400
 
     @property
     def stale_days(self) -> float:
         """Days since the issue last saw any activity."""
-        return (datetime.now(timezone.utc) - self.updated_at).total_seconds() / 86400
+        return (datetime.now(UTC) - self.updated_at).total_seconds() / 86400
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "key": self.key,
             "source": self.source,

@@ -6,7 +6,9 @@ import argparse
 import logging
 import os
 import sys
+import tomllib
 from pathlib import Path
+from typing import Any
 
 from .collect import build_queries, collect, detect_claims, enrich_repos
 from .github import GitHub, RateLimited
@@ -24,16 +26,7 @@ CONFIG_LOCATIONS = [
 ]
 
 
-def load_config(explicit: str | None = None) -> dict:
-    try:
-        import tomllib
-    except ModuleNotFoundError:  # Python < 3.11
-        if explicit:
-            console.print(
-                "[yellow]config files need Python 3.11+ (tomllib); using flags only[/]"
-            )
-        return {}
-
+def load_config(explicit: str | None = None) -> dict[str, Any]:
     paths = [Path(explicit)] if explicit else CONFIG_LOCATIONS
     for path in paths:
         if path.is_file():
@@ -57,41 +50,84 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="LANG",
         help="language to search and to favour when scoring (repeatable)",
     )
-    p.add_argument("--min-amount", type=float, default=None, metavar="N",
-                   help="hide bounties paying less than N (unpriced ones are kept)")
-    p.add_argument("--min-score", type=float, default=0.0, metavar="N",
-                   help="hide bounties scoring below N")
-    p.add_argument("--limit", type=int, default=40, help="max rows to show (default 40)")
-    p.add_argument("--max-per-query", type=int, default=100,
-                   help="results to pull per search query (default 100)")
-    p.add_argument("--new-only", action="store_true",
-                   help="only show bounties not seen on a previous run")
-    p.add_argument("--include-claimed", action="store_true",
-                   help="keep issues that already have an assignee or a PR")
-    p.add_argument("--include-suspect", action="store_true",
-                   help="keep payouts flagged as probably fake (spam repos)")
-    p.add_argument("--min-stars", type=int, default=None, metavar="N",
-                   help="hide bounties from repos with fewer than N stars")
-    p.add_argument("--per-repo", type=int, default=None, metavar="N",
-                   help="show at most N bounties per repo, best first "
-                        "(default 3; 0 disables)")
-    p.add_argument("--deep", type=int, nargs="?", const=15, default=0, metavar="N",
-                   help="check the top N results for existing PRs and dibs comments "
-                        "(2 extra API calls each; default 15)")
+    p.add_argument(
+        "--min-amount",
+        type=float,
+        default=None,
+        metavar="N",
+        help="hide bounties paying less than N (unpriced ones are kept)",
+    )
+    p.add_argument(
+        "--min-score",
+        type=float,
+        default=0.0,
+        metavar="N",
+        help="hide bounties scoring below N",
+    )
+    p.add_argument(
+        "--limit", type=int, default=40, help="max rows to show (default 40)"
+    )
+    p.add_argument(
+        "--max-per-query",
+        type=int,
+        default=100,
+        help="results to pull per search query (default 100)",
+    )
+    p.add_argument(
+        "--new-only",
+        action="store_true",
+        help="only show bounties not seen on a previous run",
+    )
+    p.add_argument(
+        "--include-claimed",
+        action="store_true",
+        help="keep issues that already have an assignee or a PR",
+    )
+    p.add_argument(
+        "--include-suspect",
+        action="store_true",
+        help="keep payouts flagged as probably fake (spam repos)",
+    )
+    p.add_argument(
+        "--min-stars",
+        type=int,
+        default=None,
+        metavar="N",
+        help="hide bounties from repos with fewer than N stars",
+    )
+    p.add_argument(
+        "--per-repo",
+        type=int,
+        default=None,
+        metavar="N",
+        help="show at most N bounties per repo, best first (default 3; 0 disables)",
+    )
+    p.add_argument(
+        "--deep",
+        type=int,
+        nargs="?",
+        const=15,
+        default=0,
+        metavar="N",
+        help="check the top N results for existing PRs and dibs comments "
+        "(2 extra API calls each; default 15)",
+    )
     p.add_argument("--explain", action="store_true", help="show the score breakdown")
     p.add_argument("--json", action="store_true", help="emit JSON instead of a table")
     p.add_argument("--config", default=None, help="path to a config.toml")
     p.add_argument("--db", default=None, help=f"state db (default {default_db_path()})")
-    p.add_argument("--no-record", action="store_true",
-                   help="don't mark these results as seen")
-    p.add_argument("--reset-seen", action="store_true",
-                   help="clear seen history and exit")
+    p.add_argument(
+        "--no-record", action="store_true", help="don't mark these results as seen"
+    )
+    p.add_argument(
+        "--reset-seen", action="store_true", help="clear seen history and exit"
+    )
     p.add_argument("--token", default=None, help="GitHub token (or set GITHUB_TOKEN)")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
 
 
-def weights_from(config: dict, languages: list[str]) -> ScoreWeights:
+def weights_from(config: dict[str, Any], languages: list[str]) -> ScoreWeights:
     w = ScoreWeights(preferred_languages=languages)
     for key, value in (config.get("scoring") or {}).items():
         if hasattr(w, key):
@@ -100,7 +136,10 @@ def weights_from(config: dict, languages: list[str]) -> ScoreWeights:
 
 
 def passes_filters(
-    b: Bounty, args, min_amount: float | None, min_stars: int | None
+    b: Bounty,
+    args: argparse.Namespace,
+    min_amount: float | None,
+    min_stars: int | None,
 ) -> bool:
     if b.score < args.min_score:
         return False
@@ -112,8 +151,8 @@ def passes_filters(
         return False
     # An unpriced bounty can't fail an amount floor -- the number is often
     # negotiated in the thread, so those stay visible.
-    if min_amount is not None and b.amount is not None and b.amount < min_amount:
-        return False
+    if min_amount is not None and b.amount is not None:
+        return b.amount >= min_amount
     return True
 
 
@@ -129,18 +168,14 @@ def main(argv: list[str] | None = None) -> int:
 
     languages = args.lang or search_cfg.get("languages") or []
     min_amount = (
-        args.min_amount
-        if args.min_amount is not None
-        else search_cfg.get("min_amount")
+        args.min_amount if args.min_amount is not None else search_cfg.get("min_amount")
     )
     extra_qualifiers = search_cfg.get("extra_qualifiers", "")
     min_stars = (
         args.min_stars if args.min_stars is not None else search_cfg.get("min_stars")
     )
     per_repo = (
-        args.per_repo
-        if args.per_repo is not None
-        else search_cfg.get("per_repo", 3)
+        args.per_repo if args.per_repo is not None else search_cfg.get("per_repo", 3)
     )
 
     token = args.token or os.environ.get("GITHUB_TOKEN")
@@ -163,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
     gh = GitHub(token)
     queries = build_queries(languages, extra_qualifiers, search_cfg.get("queries"))
 
-    def progress(i, total, query, kept):
+    def progress(i: int, total: int, query: str, kept: int) -> None:
         console.print(f"[dim][{i}/{total}][/] {query} [dim]-> {kept} new[/]")
 
     try:
@@ -216,8 +251,11 @@ def main(argv: list[str] | None = None) -> int:
     elif not shown:
         console.print(
             "[yellow]Nothing passed your filters.[/] "
-            + ("Everything was seen on a previous run." if args.new_only
-               else "Try lowering --min-score or --min-amount.")
+            + (
+                "Everything was seen on a previous run."
+                if args.new_only
+                else "Try lowering --min-score or --min-amount."
+            )
         )
     else:
         render_table(shown, new_keys, total=len(bounties))

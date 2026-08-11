@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import json
 import sys
+from contextlib import suppress
+from io import TextIOWrapper
+from typing import Any, cast
 
 from rich import box
 from rich.console import Console
@@ -18,13 +21,12 @@ from rich.text import Text
 from .models import Bounty
 
 
-def _make_console(**kwargs) -> Console:
+def _make_console(**kwargs: Any) -> Console:
     """A console that degrades unencodable characters instead of raising."""
     for stream in (sys.stdout, sys.stderr):
-        try:
-            stream.reconfigure(errors="replace")
-        except (AttributeError, ValueError):
-            pass  # not a reconfigurable text stream (piped, wrapped, etc.)
+        # Not every stream is a reconfigurable text stream (piped, wrapped).
+        with suppress(AttributeError, ValueError):
+            cast(TextIOWrapper, stream).reconfigure(errors="replace")
     return Console(**kwargs)
 
 

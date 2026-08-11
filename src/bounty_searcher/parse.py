@@ -21,9 +21,13 @@ _AMOUNT_PATTERNS = [
     # Symbol-prefixed: $1,000 / $1.5k / £250
     re.compile(r"(?P<sym>[$€£])\s?(?P<num>\d[\d,]*(?:\.\d+)?)\s*(?P<k>k\b)?", re.I),
     # Code-prefixed: USD 500 / EUR 300
-    re.compile(r"\b(?P<code>USD|EUR|GBP)\s?(?P<num>\d[\d,]*(?:\.\d+)?)\s*(?P<k>k\b)?", re.I),
+    re.compile(
+        r"\b(?P<code>USD|EUR|GBP)\s?(?P<num>\d[\d,]*(?:\.\d+)?)\s*(?P<k>k\b)?", re.I
+    ),
     # Code-suffixed: 500 USD
-    re.compile(r"\b(?P<num>\d[\d,]*(?:\.\d+)?)\s*(?P<k>k)?\s?(?P<code>USD|EUR|GBP)\b", re.I),
+    re.compile(
+        r"\b(?P<num>\d[\d,]*(?:\.\d+)?)\s*(?P<k>k)?\s?(?P<code>USD|EUR|GBP)\b", re.I
+    ),
     # Bare bounty-bot command: /bounty 250
     re.compile(r"/bounty\s+(?P<num>\d[\d,]*(?:\.\d+)?)\s*(?P<k>k\b)?", re.I),
 ]

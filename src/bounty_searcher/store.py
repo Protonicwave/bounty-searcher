@@ -11,6 +11,7 @@ import json
 import sqlite3
 import time
 from pathlib import Path
+from typing import Any
 
 from .models import Bounty
 
@@ -57,10 +58,10 @@ class Store:
     def close(self) -> None:
         self.conn.close()
 
-    def __enter__(self) -> "Store":
+    def __enter__(self) -> Store:
         return self
 
-    def __exit__(self, *exc) -> None:
+    def __exit__(self, *exc: object) -> None:
         self.close()
 
     # -- seen tracking -----------------------------------------------------
@@ -94,20 +95,21 @@ class Store:
 
     # -- repo cache --------------------------------------------------------
 
-    def get_repo(self, name: str) -> dict | None:
+    def get_repo(self, name: str) -> dict[str, Any] | None:
         row = self.conn.execute(
             "SELECT data, fetched_at FROM repo_cache WHERE name = ?", (name,)
         ).fetchone()
         if row is None or time.time() - row["fetched_at"] > REPO_CACHE_TTL:
             return None
-        data = json.loads(row["data"])
+        data: dict[str, Any] = json.loads(row["data"])
         if any(field not in data for field in REPO_CACHE_FIELDS):
             return None
         return data
 
-    def put_repo(self, name: str, data: dict) -> None:
+    def put_repo(self, name: str, data: dict[str, Any]) -> None:
         self.conn.execute(
-            "INSERT OR REPLACE INTO repo_cache (name, data, fetched_at) VALUES (?, ?, ?)",
+            "INSERT OR REPLACE INTO repo_cache (name, data, fetched_at) "
+            "VALUES (?, ?, ?)",
             (name, json.dumps(data), time.time()),
         )
         self.conn.commit()

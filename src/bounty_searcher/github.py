@@ -10,7 +10,8 @@ from __future__ import annotations
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Any
 
 import requests
 
@@ -18,6 +19,10 @@ log = logging.getLogger(__name__)
 
 API = "https://api.github.com"
 UA = "bounty-searcher/0.1"
+
+# One decoded JSON object from the API. Only the fields we read are ever
+# touched, so there is nothing to gain from modelling the whole payload.
+type JsonDict = dict[str, Any]
 
 
 class RateLimited(RuntimeError):
@@ -30,7 +35,7 @@ class GitHubError(RuntimeError):
 
 def parse_ts(value: str) -> datetime:
     """GitHub timestamps are RFC3339 with a literal Z."""
-    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
 
 
 class GitHub:
@@ -49,7 +54,7 @@ class GitHub:
 
     # -- transport ---------------------------------------------------------
 
-    def _get(self, path: str, params: dict | None = None) -> requests.Response:
+    def _get(self, path: str, params: JsonDict | None = None) -> requests.Response:
         url = path if path.startswith("http") else f"{API}{path}"
 
         for attempt in range(self.max_retries):
@@ -78,7 +83,8 @@ class GitHub:
                     hint = (
                         "Try again shortly, or narrow your queries."
                         if is_search
-                        else "Try again shortly, or scan fewer repos with --max-per-query."
+                        else "Try again shortly, or scan fewer repos with "
+                        "--max-per-query."
                     )
                 bucket = "search" if is_search else "core"
                 raise RateLimited(f"GitHub {bucket} rate limit hit. {hint}")
@@ -118,13 +124,13 @@ class GitHub:
 
     # -- endpoints ---------------------------------------------------------
 
-    def search_issues(self, query: str, max_results: int = 200) -> list[dict]:
+    def search_issues(self, query: str, max_results: int = 200) -> list[JsonDict]:
         """Run one issue-search query, paging until exhausted or capped.
 
         The search API refuses to return more than 1000 results per query, so
         `max_results` above that is silently clamped by GitHub itself.
         """
-        items: list[dict] = []
+        items: list[JsonDict] = []
         per_page = 100
         page = 1
 
@@ -151,19 +157,23 @@ class GitHub:
 
         return items[:max_results]
 
-    def get_repo(self, full_name: str) -> dict:
-        return self._get(f"/repos/{full_name}").json()
+    def get_repo(self, full_name: str) -> JsonDict:
+        repo: JsonDict = self._get(f"/repos/{full_name}").json()
+        return repo
 
-    def issue_timeline(self, full_name: str, number: int) -> list[dict]:
+    def issue_timeline(self, full_name: str, number: int) -> list[JsonDict]:
         """Timeline events -- used to spot a PR already opened against the issue."""
-        return self._get(
+        events: list[JsonDict] = self._get(
             f"/repos/{full_name}/issues/{number}/timeline", {"per_page": 100}
         ).json()
+        return events
 
-    def issue_comments(self, full_name: str, number: int) -> list[dict]:
-        return self._get(
+    def issue_comments(self, full_name: str, number: int) -> list[JsonDict]:
+        comments: list[JsonDict] = self._get(
             f"/repos/{full_name}/issues/{number}/comments", {"per_page": 100}
         ).json()
+        return comments
 
-    def rate_limit(self) -> dict:
-        return self._get("/rate_limit").json()
+    def rate_limit(self) -> JsonDict:
+        limits: JsonDict = self._get("/rate_limit").json()
+        return limits

@@ -9,8 +9,9 @@ and the scorer, not from the queries.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
-from .github import GitHub, GitHubError, parse_ts
+from .github import GitHub, GitHubError, JsonDict, parse_ts
 from .models import Bounty
 from .parse import extract_amount, looks_like_bounty
 from .store import Store
@@ -20,8 +21,8 @@ log = logging.getLogger(__name__)
 # Each entry is an issue-search query fragment; `state:open type:issue` and any
 # language filter get appended automatically.
 QUERY_TEMPLATES = [
-    'label:bounty',
-    'label:bountied',
+    "label:bounty",
+    "label:bountied",
     'label:"has bounty"',
     'label:"💰 bounty"',
     'label:"bounty 💵"',
@@ -64,12 +65,12 @@ def _repo_from_url(repository_url: str) -> str:
     return "/".join(repository_url.rstrip("/").split("/")[-2:])
 
 
-def item_to_bounty(item: dict, source: str) -> Bounty | None:
+def item_to_bounty(item: JsonDict, source: str) -> Bounty | None:
     """Convert one search result. Returns None if it isn't really a bounty."""
     if "pull_request" in item:
         return None  # search sometimes leaks PRs despite type:issue
 
-    labels = [l["name"] for l in item.get("labels", [])]
+    labels = [label["name"] for label in item.get("labels", [])]
     title = item.get("title", "")
     body = item.get("body") or ""
 
@@ -100,11 +101,15 @@ def item_to_bounty(item: dict, source: str) -> Bounty | None:
     )
 
 
+# (index, total, query, kept) -- enough for a caller to draw a progress line.
+type ProgressHook = Callable[[int, int, str, int], None]
+
+
 def collect(
     gh: GitHub,
     queries: list[str],
     max_per_query: int = 100,
-    on_progress=None,
+    on_progress: ProgressHook | None = None,
 ) -> list[Bounty]:
     """Run every query, dedupe by repo#number, keep the richest record."""
     found: dict[str, Bounty] = {}
@@ -141,7 +146,7 @@ def enrich_repos(gh: GitHub, bounties: list[Bounty], store: Store) -> None:
     move fast enough to matter for scoring.
     """
     repos = {b.repo for b in bounties}
-    meta: dict[str, dict] = {}
+    meta: dict[str, JsonDict] = {}
 
     for name in repos:
         cached = store.get_repo(name)

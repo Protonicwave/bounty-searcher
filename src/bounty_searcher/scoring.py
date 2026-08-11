@@ -127,7 +127,7 @@ def score_bounty(b: Bounty, w: ScoreWeights) -> float:
             parts["language"] = 0.0
 
     # Effort proxy from labels.
-    labels = {l.lower() for l in b.labels}
+    labels = {label.lower() for label in b.labels}
     effort = 0.0
     if labels & LOW_EFFORT_LABELS:
         effort += w.low_effort
