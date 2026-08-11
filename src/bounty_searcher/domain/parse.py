@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from dataclasses import replace
 from decimal import Decimal, InvalidOperation
 
 from .models import Amount, AmountField, Confidence, Provenance
@@ -164,6 +165,25 @@ def extract_amount(labels: Sequence[str], title: str, body: str) -> Amount | Non
             return max(hits, key=lambda a: a.minor_units)
 
     return None
+
+
+def extract_comment_amount(text: str, *, trusted: bool = False) -> Amount | None:
+    """The payout advertised in one comment, or None if there is not one.
+
+    Bounty platforms post the figure as a comment rather than editing the
+    issue, so for a large share of real bounties this is the only place the
+    number is written down at all, and issue search cannot see it.
+
+    ``trusted`` says the comment came from a platform that actually moves the
+    money, which makes the figure as good as one on a maintainer's label.
+    """
+    hits = _candidates(clean_body(text or ""), AmountField.COMMENT)
+    if not hits:
+        return None
+    best = max(hits, key=lambda a: a.minor_units)
+    if trusted and best.confidence is not Confidence.HIGH:
+        return replace(best, confidence=Confidence.HIGH)
+    return best
 
 
 def looks_like_bounty(labels: Sequence[str], title: str, body: str) -> bool:
