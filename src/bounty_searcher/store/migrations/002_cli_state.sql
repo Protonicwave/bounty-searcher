@@ -1,7 +1,7 @@
--- State belonging to the original CLI: which issues it has already shown you,
--- and a week-long cache of repo metadata. Both are superseded by the corpus
--- above (first_seen_at, and the repository columns on bounty) and go when the
--- CLI moves onto it. Declared here so there is one schema and one runner.
+-- State that belonged to the original CLI: which issues it had already shown
+-- you, and a week-long cache of repository metadata. Migration 004 drops both,
+-- now that the CLI reads the corpus instead. This file stays because
+-- migrations are a record of what happened, not a description of the schema.
 
 CREATE TABLE IF NOT EXISTS seen (
     key        TEXT PRIMARY KEY,

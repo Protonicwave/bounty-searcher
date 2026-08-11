@@ -1,22 +1,26 @@
-"""Command line entry point."""
+"""Command line entry point.
+
+The shape of a run is: sweep into the corpus, then read back out of it. The two
+halves are independent, which is the point. A scan can be skipped entirely and
+the same query answered from what is already stored, at no quota cost and in
+milliseconds.
+"""
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import os
 import sys
-import tomllib
-from dataclasses import fields
+from dataclasses import fields, replace
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
-from .collect import build_queries, collect, detect_claims, enrich_repos
-from .domain.models import Bounty, ScoredBounty
+from .config import ConfigError, ScanSettings, load_config, scan_settings
+from .domain.models import MINOR_UNIT_EXPONENT, ScoredBounty
 from .domain.scoring import ScoreWeights
-from .domain.select import cap_per_repo, rank
-from .github import GitHub, RateLimited
+from .domain.select import cap_per_repo
 from .render import (
     _make_console,
     describe_dropped,
@@ -24,27 +28,28 @@ from .render import (
     render_json,
     render_table,
 )
-from .store.db import default_db_path
-from .store.legacy import Store
+from .scan.planner import Planner
+from .scan.runner import ScanOutcome, ScanProgress, run_scan
+from .sources.base import Source
+from .sources.github.client import GitHubClient, RateLimited
+from .sources.github.comments import CommentSource
+from .sources.github.issues import find_claim
+from .sources.github.repos import WatchlistSource
+from .sources.github.search import SearchSource
+from .store import bounties as store_bounties
+from .store import repos as store_repos
+from .store import scans
+from .store.bounties import BountyFilter, SortKey
+from .store.db import Database, default_db_path
+from .store.http_cache import load_etags, save_etags
 
 console = _make_console(stderr=True)
 
-CONFIG_LOCATIONS = [
-    Path("config.toml"),
-    Path.home() / ".bounty-searcher" / "config.toml",
-]
-
-
-def load_config(explicit: str | None = None) -> dict[str, Any]:
-    paths = [Path(explicit)] if explicit else CONFIG_LOCATIONS
-    for path in paths:
-        if path.is_file():
-            with path.open("rb") as fh:
-                return tomllib.load(fh)
-    if explicit:
-        console.print(f"[red]config not found: {explicit}[/]")
-        sys.exit(2)
-    return {}
+# How much of the ranked corpus to read before the per-repo cap is applied.
+# The cap needs more rows than it will show, since it discards some, but not
+# the whole corpus.
+WINDOW_MULTIPLIER = 5
+MIN_WINDOW = 200
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -77,15 +82,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--limit", type=int, default=40, help="max rows to show (default 40)"
     )
     p.add_argument(
-        "--max-per-query",
+        "--budget",
         type=int,
-        default=100,
-        help="results to pull per search query (default 100)",
+        default=None,
+        metavar="N",
+        help="requests one sweep may spend (0 for no limit)",
     )
     p.add_argument(
         "--new-only",
         action="store_true",
-        help="only show bounties not seen on a previous run",
+        help="only show bounties this scan added to the corpus",
     )
     p.add_argument(
         "--include-claimed",
@@ -124,49 +130,195 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--explain", action="store_true", help="show the score breakdown")
     p.add_argument("--json", action="store_true", help="emit JSON instead of a table")
     p.add_argument("--config", default=None, help="path to a config.toml")
-    p.add_argument("--db", default=None, help=f"state db (default {default_db_path()})")
+    p.add_argument("--db", default=None, help=f"corpus (default {default_db_path()})")
     p.add_argument(
-        "--no-record", action="store_true", help="don't mark these results as seen"
+        "--no-scan",
+        action="store_true",
+        help="read the stored corpus without going near the network",
     )
-    p.add_argument(
-        "--reset-seen", action="store_true", help="clear seen history and exit"
-    )
+    p.add_argument("--forget", action="store_true", help="empty the corpus and exit")
     p.add_argument("--token", default=None, help="GitHub token (or set GITHUB_TOKEN)")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
 
 
-def weights_from(config: dict[str, Any], languages: list[str]) -> ScoreWeights:
+def weights_from(config: dict[str, Any], languages: tuple[str, ...]) -> ScoreWeights:
     known = {f.name for f in fields(ScoreWeights)}
     overrides = {
         key: value
         for key, value in (config.get("scoring") or {}).items()
         if key in known
     }
-    overrides["preferred_languages"] = tuple(languages)
+    overrides["preferred_languages"] = languages
     return ScoreWeights(**overrides)
 
 
-def passes_filters(
-    scored: ScoredBounty,
-    args: argparse.Namespace,
-    min_amount: float | None,
-    min_stars: int | None,
-) -> bool:
-    b = scored.bounty
-    if scored.score.total < args.min_score:
-        return False
-    if not args.include_claimed and b.claimed:
-        return False
-    if not args.include_suspect and scored.suspect:
-        return False
-    if min_stars is not None and (b.stars or 0) < min_stars:
-        return False
-    # An unpriced bounty can't fail an amount floor: the number is often
-    # negotiated in the thread, so those stay visible.
-    if min_amount is not None and b.amount is not None:
-        return float(b.amount.units) >= min_amount
-    return True
+def filters_from(
+    args: argparse.Namespace, config: dict[str, Any], since: datetime | None
+) -> BountyFilter:
+    """The display filters, from flags first and the search table second."""
+    search = config.get("search") or {}
+    min_amount = (
+        args.min_amount if args.min_amount is not None else search.get("min_amount")
+    )
+    min_stars = (
+        args.min_stars if args.min_stars is not None else search.get("min_stars")
+    )
+
+    return BountyFilter(
+        min_amount_minor=(
+            None
+            if min_amount is None
+            else int(round(float(min_amount) * 10**MINOR_UNIT_EXPONENT))
+        ),
+        min_stars=min_stars,
+        min_score=args.min_score or None,
+        first_seen_after=since if args.new_only else None,
+        include_suspect=args.include_suspect,
+        include_claimed=args.include_claimed,
+        # An unpriced bounty cannot fail an amount floor: the figure is often
+        # negotiated in the thread, so those stay visible.
+        include_unpriced=True,
+    )
+
+
+def read_corpus(
+    db: Database, now: datetime, filters: BountyFilter, per_repo: int, limit: int
+) -> tuple[list[ScoredBounty], dict[str, int], int]:
+    """The ranked page to show, what the per-repo cap collapsed, and the total.
+
+    Reads a window rather than the corpus: the cap discards rows, so it needs
+    more than it will show, but nothing like all of them.
+    """
+    window = max(limit * WINDOW_MULTIPLIER, MIN_WINDOW)
+    page = store_bounties.list_bounties(
+        db.conn, as_of=now, filters=filters, sort=SortKey.SCORE, limit=window
+    )
+    kept, dropped = cap_per_repo(list(page.rows), per_repo)
+    return kept[:limit], dropped, page.total
+
+
+def build_sources(
+    client: GitHubClient, db: Database, settings: ScanSettings, planner: Planner
+) -> tuple[list[Source], int]:
+    """Every source a sweep will run, and how many requests it expects to cost."""
+    planned = planner.plan()
+    sources: list[Source] = [
+        SearchSource(client, [query.as_source_query() for query in planned])
+    ]
+    cost = sum(query.pages for query in planned)
+
+    previous = scans.latest_run(db.conn)
+    since = (
+        previous.finished_at
+        if previous is not None and previous.status is scans.RunStatus.DONE
+        else None
+    )
+
+    watched = store_repos.watchlist(db.conn, settings.watchlist)
+    if watched:
+        sources.append(WatchlistSource(client, watched, since=since))
+        cost += len(watched)
+        if settings.watch_comments:
+            sources.append(CommentSource(client, watched, since=since))
+            cost += 2 * len(watched)
+
+    return sources, cost
+
+
+async def deep_check(
+    client: GitHubClient,
+    db: Database,
+    weights: ScoreWeights,
+    now: datetime,
+    depth: int,
+) -> int:
+    """Look for an open PR or a dibs comment on the best unclaimed bounties.
+
+    Two requests each, so it runs on a shortlist rather than on the corpus.
+    """
+    page = store_bounties.list_bounties(
+        db.conn,
+        as_of=now,
+        filters=BountyFilter(include_claimed=False),
+        sort=SortKey.SCORE,
+        limit=depth,
+    )
+
+    claimed = 0
+    for row in page.rows:
+        reason = await find_claim(client, row.bounty.repo, row.bounty.number)
+        if reason is None or reason == row.bounty.claim_reason or row.bounty_id is None:
+            continue
+        # Re-read for the body, so rewriting the row does not blank it.
+        stored = store_bounties.get(db.conn, row.bounty_id)
+        if stored is None:
+            continue
+        store_bounties.upsert_many(
+            db.conn, [replace(stored.bounty, claim_reason=reason)], now
+        )
+        store_bounties.score_bounties(db.conn, weights, now, bounty_ids=[row.bounty_id])
+        claimed += 1
+    return claimed
+
+
+async def sweep(
+    db: Database,
+    settings: ScanSettings,
+    weights: ScoreWeights,
+    now: datetime,
+    token: str | None,
+    depth: int,
+) -> ScanOutcome:
+    """One full pass: plan, fetch, write, and optionally deep check."""
+    etags = load_etags(db.conn)
+    planner = Planner(settings, now.date())
+
+    def progress(event: ScanProgress) -> None:
+        console.print(
+            f"[dim][{event.completed}/{event.planned}][/] {event.query}"
+            + (
+                f" [red]{event.error}[/]"
+                if event.error
+                else f" [dim]-> {event.new_bounties} new[/]"
+            )
+        )
+
+    async with GitHubClient(token, concurrency=settings.workers, etags=etags) as client:
+        sources, cost = build_sources(client, db, settings, planner)
+        console.print(f"[dim]planned {cost} requests across {len(sources)} sources[/]")
+
+        outcome = await run_scan(
+            db,
+            client,
+            sources,
+            weights=weights,
+            now=now,
+            planner=planner,
+            workers=settings.workers,
+            on_progress=progress,
+        )
+
+        if depth:
+            console.print(f"[dim]deep-checking the top {depth} for claims...[/]")
+            claimed = await deep_check(client, db, weights, now, depth)
+            if claimed:
+                console.print(f"[dim]{claimed} turned out to be taken[/]")
+
+        save_etags(db.conn, client.etags, now)
+
+    return outcome
+
+
+def report(outcome: ScanOutcome) -> None:
+    resumed = " (resumed)" if outcome.resumed else ""
+    console.print(
+        f"[dim]{outcome.completed}/{outcome.planned} queries{resumed}, "
+        f"{outcome.requests} requests, {outcome.inserted} new, "
+        f"{outcome.changed} changed"
+        + (f", {outcome.failed} failed" if outcome.failed else "")
+        + "[/]"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -176,118 +328,67 @@ def main(argv: list[str] | None = None) -> int:
         format="%(levelname)s %(name)s: %(message)s",
     )
 
-    config = load_config(args.config)
-    search_cfg = config.get("search") or {}
+    try:
+        config = load_config(args.config)
+    except ConfigError as exc:
+        console.print(f"[red]{exc}[/]")
+        return 2
 
-    languages = args.lang or search_cfg.get("languages") or []
-    min_amount = (
-        args.min_amount if args.min_amount is not None else search_cfg.get("min_amount")
-    )
-    extra_qualifiers = search_cfg.get("extra_qualifiers", "")
-    min_stars = (
-        args.min_stars if args.min_stars is not None else search_cfg.get("min_stars")
-    )
-    per_repo = (
-        args.per_repo if args.per_repo is not None else search_cfg.get("per_repo", 3)
-    )
+    languages = tuple(args.lang or ())
+    settings = scan_settings(config, languages=languages)
+    if args.budget is not None:
+        settings = replace(settings, request_budget=args.budget)
 
-    token = args.token or os.environ.get("GITHUB_TOKEN")
-    if not token:
-        console.print(
-            "[yellow]No GITHUB_TOKEN set.[/] Unauthenticated search is limited to "
-            "10 requests/minute, so this run will be slow and may hit the cap.\n"
-            "Create a token at https://github.com/settings/tokens (no scopes needed "
-            "for public repos) and set GITHUB_TOKEN.\n"
-        )
-
-    store = Store(args.db)
-
-    if args.reset_seen:
-        count = store.forget_all()
-        store.close()
-        console.print(f"Cleared {count} seen entries.")
-        return 0
-
-    gh = GitHub(token)
-    queries = build_queries(languages, extra_qualifiers, search_cfg.get("queries"))
-
-    def progress(i: int, total: int, query: str, kept: int) -> None:
-        console.print(f"[dim][{i}/{total}][/] {query} [dim]-> {kept} new[/]")
+    search = config.get("search") or {}
+    per_repo = args.per_repo if args.per_repo is not None else search.get("per_repo", 3)
+    weights = weights_from(config, settings.languages)
 
     # The clock is read once, here at the edge, and passed down. Everything
-    # below scores against this moment rather than its own.
+    # below scores and filters against this moment rather than its own.
     now = datetime.now(UTC)
 
-    try:
-        bounties: list[Bounty] = collect(
-            gh, queries, max_per_query=args.max_per_query, on_progress=progress
-        )
-        if not bounties:
-            console.print("[yellow]No bounties matched. Try dropping --lang.[/]")
-            store.close()
+    with Database(args.db) as db:
+        if args.forget:
+            console.print(f"Forgot {store_bounties.forget_all(db.conn)} bounties.")
             return 0
 
-        console.print(
-            f"[dim]resolving metadata for {len({b.repo for b in bounties})} repos...[/]"
-        )
-        bounties = enrich_repos(gh, bounties, store)
+        if not args.no_scan:
+            token = args.token or os.environ.get("GITHUB_TOKEN")
+            if not token:
+                console.print(
+                    "[yellow]No GITHUB_TOKEN set.[/] Unauthenticated search is "
+                    "limited to 10 requests/minute, so this run will be slow and "
+                    "will not get far.\nCreate a token at "
+                    "https://github.com/settings/tokens (no scopes needed for "
+                    "public repos) and set GITHUB_TOKEN.\n"
+                )
+            try:
+                report(asyncio.run(sweep(db, settings, weights, now, token, args.deep)))
+            except RateLimited as exc:
+                console.print(f"[red]{exc}[/]")
+                return 1
 
-        weights = weights_from(config, languages)
-
-        if args.deep:
-            ranked = rank(bounties, weights, now)
-            shortlist = [s.bounty for s in ranked if not s.bounty.claimed][: args.deep]
-            console.print(f"[dim]deep-checking top {len(shortlist)} for claims...[/]")
-            checked = {b.key: b for b in detect_claims(gh, shortlist)}
-            bounties = [checked.get(b.key, b) for b in bounties]
-
-        scored = rank(bounties, weights, now)
-
-    except RateLimited as exc:
-        console.print(f"[red]{exc}[/]")
-        store.close()
-        return 1
-
-    known = store.known_keys()
-    new_keys = {s.bounty.key for s in scored} - known
-
-    results = [s for s in scored if passes_filters(s, args, min_amount, min_stars)]
-    hidden = len(scored) - len(results)
-    if args.new_only:
-        results = [s for s in results if s.bounty.key in new_keys]
-
-    # Applied last, so the cap operates on what you'd actually have been shown.
-    results, dropped = cap_per_repo(results, per_repo)
-
-    if not args.no_record:
-        store.record(scored)
-    store.close()
-
-    shown = results[: args.limit]
+        filters = filters_from(args, config, now)
+        results, dropped, total = read_corpus(db, now, filters, per_repo, args.limit)
+        new_keys = store_bounties.keys_first_seen_after(db.conn, now)
 
     if args.json:
-        render_json(shown, now, new_keys)
-    elif not shown:
+        render_json(results, now, new_keys)
+    elif not results:
         console.print(
             "[yellow]Nothing passed your filters.[/] "
             + (
-                "Everything was seen on a previous run."
+                "This scan found nothing you had not already seen."
                 if args.new_only
                 else "Try lowering --min-score or --min-amount."
             )
         )
     else:
-        render_table(shown, now, new_keys, total=len(scored))
+        render_table(results, now, new_keys, total=total)
         if note := describe_dropped(dropped, per_repo):
             console.print(f"[dim]{note}[/]")
-        if hidden:
-            console.print(
-                f"[dim]{hidden} hidden by filters (claimed / suspect payout / "
-                f"below thresholds). Use --include-claimed, --include-suspect "
-                f"or lower --min-score to see them.[/]"
-            )
         if args.explain:
-            render_explain(shown)
+            render_explain(results)
 
     return 0
 

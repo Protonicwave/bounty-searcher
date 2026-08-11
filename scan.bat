@@ -31,7 +31,7 @@ if errorlevel 1 (
     goto :end
 )
 
-python -c "import rich, requests" >nul 2>nul
+python -c "import rich, httpx" >nul 2>nul
 if errorlevel 1 (
     echo Installing dependencies...
     python -m pip install -e .

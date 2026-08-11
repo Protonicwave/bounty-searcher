@@ -158,10 +158,19 @@ class BountyFilter:
     min_amount_minor: int | None = None
     min_stars: int | None = None
     max_age_days: float | None = None
+    # Only what the corpus first saw at or after this moment, which is what
+    # "new since the last scan" means once the corpus is the record.
+    first_seen_after: datetime | None = None
+    min_score: float | None = None
     statuses: tuple[TriageStatus, ...] = ()
     text: str | None = None
     include_suspect: bool = False
     include_claimed: bool = True
+    # Whether a bounty with no readable figure survives an amount floor. The
+    # number is often negotiated in the thread, so for a person reading the
+    # list it should; for a caller asking "what pays at least this much", it
+    # should not.
+    include_unpriced: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -511,14 +520,24 @@ def _where(filters: BountyFilter, as_of: datetime) -> tuple[list[str], list[obje
         clauses.append("LOWER(b.language) = ?")
         params.append(filters.language.lower())
     if filters.min_amount_minor is not None:
-        clauses.append("b.amount_minor >= ?")
+        clauses.append(
+            "(b.amount_minor IS NULL OR b.amount_minor >= ?)"
+            if filters.include_unpriced
+            else "b.amount_minor >= ?"
+        )
         params.append(filters.min_amount_minor)
+    if filters.min_score is not None:
+        clauses.append("s.total >= ?")
+        params.append(filters.min_score)
     if filters.min_stars is not None:
         clauses.append("COALESCE(b.stars, 0) >= ?")
         params.append(filters.min_stars)
     if filters.max_age_days is not None:
         clauses.append("b.created_at >= ?")
         params.append(to_ts(as_of - timedelta(days=filters.max_age_days)))
+    if filters.first_seen_after is not None:
+        clauses.append("b.first_seen_at >= ?")
+        params.append(to_ts(filters.first_seen_after))
     if filters.statuses:
         placeholders = ", ".join("?" * len(filters.statuses))
         clauses.append(f"{_STATUS_EXPR} IN ({placeholders})")
@@ -585,6 +604,25 @@ def list_bounties(
         total=total,
         next_cursor=next_cursor,
     )
+
+
+def keys_first_seen_after(conn: sqlite3.Connection, moment: datetime) -> set[str]:
+    """Identities the corpus first saw at or after a moment.
+
+    What a scan just added, for the marker beside a row in the table.
+    """
+    return {
+        f"{row['repo']}#{row['number']}"
+        for row in conn.execute(
+            "SELECT repo, number FROM bounty WHERE first_seen_at >= ?",
+            (to_ts(moment),),
+        )
+    }
+
+
+def forget_all(conn: sqlite3.Connection) -> int:
+    """Empty the corpus. Scores, triage and the undo journal go with it."""
+    return int(conn.execute("DELETE FROM bounty").rowcount)
 
 
 def get(conn: sqlite3.Connection, bounty_id: int) -> ScoredBounty | None:

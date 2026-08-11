@@ -55,7 +55,8 @@ Useful flags:
 | `--explain` | Show the score breakdown per bounty. |
 | `--json` | Machine-readable output. |
 | `--include-claimed` / `--include-suspect` | Turn off the default filters. |
-| `--reset-seen` | Forget history, so everything counts as new again. |
+| `--no-scan` | Read the stored corpus without going near the network. |
+| `--forget` | Empty the corpus, so everything counts as new again. |
 
 Settings can live in `config.toml` instead of flags — copy `config.example.toml`
 and edit. Flags override the file.
