@@ -150,6 +150,41 @@ def finish_query(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class RunTotals:
+    """What a run has done so far, summed from its queries."""
+
+    completed: int
+    failed: int
+    results: int
+    new_bounties: int
+
+
+def run_totals(conn: sqlite3.Connection, run_id: int) -> RunTotals:
+    """Progress on one run, for the status line and for a late subscriber.
+
+    Read from the query rows rather than counted in memory, so it is the same
+    answer after a restart as it was before one.
+    """
+    row = conn.execute(
+        """
+        SELECT COUNT(*) AS completed,
+               COALESCE(SUM(status = ?), 0) AS failed,
+               COALESCE(SUM(results), 0) AS results,
+               COALESCE(SUM(new_bounties), 0) AS new_bounties
+        FROM scan_query
+        WHERE run_id = ? AND finished_at IS NOT NULL
+        """,
+        (QueryStatus.FAILED.value, run_id),
+    ).fetchone()
+    return RunTotals(
+        completed=row["completed"],
+        failed=row["failed"],
+        results=row["results"],
+        new_bounties=row["new_bounties"],
+    )
+
+
 def completed_queries(conn: sqlite3.Connection, run_id: int) -> set[tuple[str, str]]:
     """The (source, query) pairs this run has already finished.
 

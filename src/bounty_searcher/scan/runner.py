@@ -51,6 +51,10 @@ class ScanProgress:
 
 type ProgressHook = Callable[[ScanProgress], None]
 
+# Called once the run has an identity, before any request goes out. A caller
+# that has to answer "which run did I just start?" cannot wait for the outcome.
+type StartHook = Callable[[int, bool], None]
+
 
 @dataclass(frozen=True, slots=True)
 class ScanOutcome:
@@ -272,6 +276,7 @@ async def run_scan(
     workers: int = DEFAULT_WORKERS,
     resume: bool = True,
     on_progress: ProgressHook | None = None,
+    on_start: StartHook | None = None,
 ) -> ScanOutcome:
     """Run every source's plan, writing as it goes.
 
@@ -298,6 +303,8 @@ async def run_scan(
         previous.id if previous is not None else scans.start_run(database.conn, now, 0)
     )
     done = scans.completed_queries(database.conn, sweep.run_id) if resumed else set()
+    if on_start is not None:
+        on_start(sweep.run_id, resumed)
 
     for source in sources:
         for query in source.plan():

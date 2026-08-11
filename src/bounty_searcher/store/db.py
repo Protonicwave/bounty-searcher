@@ -59,7 +59,11 @@ def connect(path: Path | str | None = None) -> sqlite3.Connection:
     if resolved != Path(":memory:"):
         resolved.parent.mkdir(parents=True, exist_ok=True)
 
-    conn = sqlite3.connect(resolved, isolation_level=None)
+    # The connection outlives the thread that opened it: an ASGI server runs
+    # the event loop wherever it likes, and everything that touches the corpus
+    # is serialised onto that loop rather than by a lock here. SQLite's own
+    # default threading mode is serialised, so the handle is safe to share.
+    conn = sqlite3.connect(resolved, isolation_level=None, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     for pragma in PRAGMAS:
         conn.execute(pragma)
