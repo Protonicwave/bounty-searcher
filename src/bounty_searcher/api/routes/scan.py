@@ -23,7 +23,11 @@ router = APIRouter(prefix="/scan", tags=["scan"])
 RETRY_MS = 5_000
 
 
-@router.post("", response_model=ScanStarted)
+@router.post(
+    "",
+    response_model=ScanStarted,
+    responses={status.HTTP_409_CONFLICT: {"description": "A scan is already running"}},
+)
 async def start(state: State, now: Now) -> ScanStarted:
     """Begin a sweep in the background and return its run identifier.
 
@@ -54,7 +58,16 @@ def _frame(name: str, payload: str) -> str:
     return f"event: {name}\ndata: {payload}\n\n"
 
 
-@router.get("/events")
+@router.get(
+    "/events",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Progress until the sweep stops",
+            "content": {"text/event-stream": {}},
+        }
+    },
+)
 async def events(state: State) -> StreamingResponse:
     """Stream this sweep's progress until it stops.
 

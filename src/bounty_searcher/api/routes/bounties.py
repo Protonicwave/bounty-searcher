@@ -122,7 +122,11 @@ async def list_bounties(
     )
 
 
-@router.get("/bounties/{bounty_id}", response_model=BountyDetail)
+@router.get(
+    "/bounties/{bounty_id}",
+    response_model=BountyDetail,
+    responses={status.HTTP_404_NOT_FOUND: {"description": "No such bounty"}},
+)
 async def get_bounty(state: State, now: Now, bounty_id: int) -> BountyDetail:
     """One bounty in full: body, breakdown, and where the figure came from."""
     scored = store_bounties.get(state.db.conn, bounty_id)

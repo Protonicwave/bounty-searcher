@@ -31,7 +31,11 @@ def _missing(conn: sqlite3.Connection, bounty_ids: list[int]) -> list[int]:
     return [bounty_id for bounty_id in bounty_ids if bounty_id not in found]
 
 
-@router.post("", response_model=TriageResult)
+@router.post(
+    "",
+    response_model=TriageResult,
+    responses={status.HTTP_404_NOT_FOUND: {"description": "No such bounty"}},
+)
 async def apply(state: State, now: Now, request: TriageRequest) -> TriageResult:
     """Move bounties to a status, and return the token that undoes it."""
     conn = state.db.conn
