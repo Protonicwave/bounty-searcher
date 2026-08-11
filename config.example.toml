@@ -1,28 +1,68 @@
 # Copy to config.toml (or ~/.bounty-searcher/config.toml) and edit.
-# Every value here can also be passed as a command-line flag.
+#
+# Two tables, because they answer different questions. [scan] decides what the
+# crawler goes and fetches, which costs quota and takes minutes. [search]
+# decides what you are shown out of what it found, which costs nothing.
+
+[scan]
+# Only scan these languages. Omit to scan everything and filter later, which
+# is what the corpus is for. Each language multiplies the number of queries.
+# languages = ["typescript", "rust"]
+
+# How far back the monthly windows reach. Each month is a separate query with
+# its own 1,000 result allowance, so this is the main lever against the search
+# ceiling. Twelve months of the default vocabulary is about 400 requests.
+lookback_months = 12
+
+# Stop planning once a sweep would cost this many requests. Search allows 30 a
+# minute, so 600 is roughly a twenty minute sweep. 0 plans the lot.
+request_budget = 600
+
+# A floor on every search query. Mirrors `credible_stars` below: under it, a
+# payout is treated as spam anyway, so there is no point spending quota
+# fetching it. Set to 0 to scan everything.
+min_stars = 5
+
+# Repositories to poll directly, on the core budget of 5,000 an hour rather
+# than the search budget of 30 a minute. Anything that has paid before, and
+# anything you shortlist, is added to these automatically.
+# watchlist = ["cal-com/cal.com", "twentyhq/twenty"]
+
+# Read the comments on watched repositories. Algora and the rest post the
+# bounty as a comment rather than editing the issue, and issue search does not
+# index comments, so this is the only way to see them.
+watch_comments = true
+
+# How many queries run at once. The quota governor is what actually paces the
+# sweep, so raising this mostly changes how quickly you reach the limit.
+workers = 6
+
+# Override the search vocabulary entirely. Omit to use the defaults, which
+# cover label:bounty, the emoji bounty labels, bracketed titles, and the
+# Algora, Polar and Gitcoin markers.
+# vocabulary = ['label:bounty', 'label:"💰 bounty"']
+
+# Star bands used to split a query that saturated. Clamped to min_stars, so a
+# split can never widen the query it came from.
+# star_bands = ["5..100", "100..1000", "1000..10000", ">10000"]
+
+# Extra GitHub search qualifiers glued onto every query. Useful ones:
+#   "-repo:some/monorepo"   exclude a repo you never want to see
+#   "comments:<5"           only uncontested threads
+extra_qualifiers = ""
 
 [search]
-languages = ["typescript", "javascript"]
+# Hide bounties under this. Unpriced ones are kept: the figure is often
+# negotiated in the thread.
 min_amount = 50
 
-# Repos below this many stars are hidden entirely. GitHub has a lot of
-# bounty-farming spam repos; see `credible_stars` below for the softer filter
-# that only demotes them.
+# Hide bounties from repos below this many stars. This one only filters the
+# display; `scan.min_stars` is what stops them being fetched at all.
 min_stars = 5
 
 # Show at most this many bounties from any one repo, so a project that files
 # six near-identical issues can't take over the list. 0 disables the cap.
 per_repo = 3
-
-# Extra GitHub search qualifiers glued onto every query. Useful ones:
-#   "created:>2025-01-01"   only recent issues
-#   "-repo:some/monorepo"   exclude a repo you never want to see
-#   "comments:<5"           only uncontested threads
-extra_qualifiers = ""
-
-# Override the built-in query list entirely. Omit to use the defaults, which
-# cover label:bounty, the emoji bounty labels, Algora and Polar bot markers.
-# queries = ['label:bounty', 'label:"💰 bounty"']
 
 [scoring]
 # Payout curve: `payout_halfway` is the dollar figure that earns half of
