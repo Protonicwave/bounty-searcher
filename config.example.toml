@@ -1,54 +1,122 @@
 # Copy to config.toml (or ~/.bounty-searcher/config.toml) and edit.
-# Every value here can also be passed as a command-line flag.
+#
+# Two tables, because they answer different questions. [scan] decides what the
+# crawler goes and fetches, which costs quota and takes minutes. [search]
+# decides what you are shown out of what it found, which costs nothing.
+
+[scan]
+# Only scan these languages. Omit to scan everything and filter later, which
+# is what the corpus is for. Each language multiplies the number of queries.
+# languages = ["typescript", "rust"]
+
+# How far back the monthly windows reach. Each month is a separate query with
+# its own 1,000 result allowance, so this is the main lever against the search
+# ceiling. Twelve months of the default vocabulary is about 400 requests.
+lookback_months = 12
+
+# Stop planning once a sweep would cost this many requests. Search allows 30 a
+# minute, so 600 is roughly a twenty minute sweep. 0 plans the lot.
+request_budget = 600
+
+# A floor on every search query. Mirrors `credible_stars` below: under it, a
+# payout is treated as spam anyway, so there is no point spending quota
+# fetching it. Set to 0 to scan everything.
+min_stars = 5
+
+# Repositories to poll directly, on the core budget of 5,000 an hour rather
+# than the search budget of 30 a minute. Anything that has paid before, and
+# anything you shortlist, is added to these automatically.
+# watchlist = ["cal-com/cal.com", "twentyhq/twenty"]
+
+# Read the comments on watched repositories. Algora and the rest post the
+# bounty as a comment rather than editing the issue, and issue search does not
+# index comments, so this is the only way to see them.
+watch_comments = true
+
+# How many queries run at once. The quota governor is what actually paces the
+# sweep, so raising this mostly changes how quickly you reach the limit.
+workers = 6
+
+# Override the search vocabulary entirely. Omit to use the defaults, which
+# cover label:bounty, the emoji bounty labels, bracketed titles, and the
+# Algora, Polar and Gitcoin markers.
+# vocabulary = ['label:bounty', 'label:"💰 bounty"']
+
+# Star bands used to split a query that saturated. Clamped to min_stars, so a
+# split can never widen the query it came from.
+# star_bands = ["5..100", "100..1000", "1000..10000", ">10000"]
+
+# Extra GitHub search qualifiers glued onto every query. Useful ones:
+#   "-repo:some/monorepo"   exclude a repo you never want to see
+#   "comments:<5"           only uncontested threads
+extra_qualifiers = ""
 
 [search]
-languages = ["typescript", "javascript"]
+# Hide bounties under this. Unpriced ones are kept: the figure is often
+# negotiated in the thread.
 min_amount = 50
 
-# Repos below this many stars are hidden entirely. GitHub has a lot of
-# bounty-farming spam repos; see `credible_stars` below for the softer filter
-# that only demotes them.
+# Hide bounties from repos below this many stars. This one only filters the
+# display; `scan.min_stars` is what stops them being fetched at all.
 min_stars = 5
 
 # Show at most this many bounties from any one repo, so a project that files
 # six near-identical issues can't take over the list. 0 disables the cap.
 per_repo = 3
 
-# Extra GitHub search qualifiers glued onto every query. Useful ones:
-#   "created:>2025-01-01"   only recent issues
-#   "-repo:some/monorepo"   exclude a repo you never want to see
-#   "comments:<5"           only uncontested threads
-extra_qualifiers = ""
-
-# Override the built-in query list entirely. Omit to use the defaults, which
-# cover label:bounty, the emoji bounty labels, Algora and Polar bot markers.
-# queries = ['label:bounty', 'label:"💰 bounty"']
-
 [scoring]
-# Payout curve: `payout_halfway` is the dollar figure that earns half of
-# `payout_max`. Lower it if you're happy with small, fast bounties.
+# Every key below is optional, and what you see is the default. Changing any
+# of them re-scores the whole corpus on the next run, in a second or so, with
+# no network cost: scores are computed from stored fields, never refetched.
+#
+# The six groups are the six segments of the score rail, in order.
+
+# Payout. `payout_halfway` is the figure that earns half of `payout_max`, and
+# the curve asymptotes from there, so one huge number cannot dominate the
+# ranking. Lower it if you are happy with small, fast bounties.
 payout_max = 40.0
 payout_halfway = 300.0
+# What an unreadable figure costs. These still show up, just demoted: the
+# amount is often negotiated in the thread.
+unpriced_penalty = 12.0
 
+# Language, against the languages you asked for. Nothing is scored here at all
+# unless you name one, with --lang or scan.languages.
 language_match = 15.0
-low_effort = 12.0
-high_effort = -10.0
+language_unknown = -4.0
 
-# How hard to punish crowded and stale threads. Raise these if you keep
-# losing races; lower them if the list is too thin.
+# Effort, read off the labels.
+low_effort = 12.0    # good first issue, and the like
+high_effort = -10.0  # epic, rfc, and the like
+help_wanted = 4.0
+
+# Freshness. Popular bounties are claimed within hours, so age is punished.
+freshness_max = 12.0
+freshness_zero_days = 60.0
+stale_penalty = 8.0
+stale_after_days = 120.0
+
+# Competition: every comment is one more person who has looked at it, and an
+# assignee or a linked PR is usually a dead end. Raise these if you keep
+# losing races, lower them if the list is too thin.
 comment_penalty_each = 1.5
 comment_penalty_cap = 15.0
 claimed_penalty = 45.0
-freshness_max = 12.0
-freshness_zero_days = 60.0
 
-# Issues with no parseable dollar figure still show up, just demoted.
-unpriced_penalty = 12.0
-
-# Spam defence. Any priced bounty from a repo under `credible_stars` stars is
-# flagged "suspect" and hidden unless you pass --include-suspect. Raise it if
-# fake bounties still get through; drop it to 0 to trust everything.
-credible_stars = 5
-absurd_payout = 10000.0
+# The repository itself. The sweet spot is big enough to pay and small enough
+# to merge an outside PR; huge repos are slow, and forks carry the same seeded
+# bounty issue in every copy.
+sweet_spot_stars = [100, 20000]
+sweet_spot_bonus = 4.0
+crowded_stars = 50000
+crowded_penalty = 3.0
 no_stars_penalty = 8.0
 fork_penalty = 10.0
+
+# Spam defence, which is a filter rather than a weight. A priced bounty from a
+# repo under `credible_stars` is flagged suspect and hidden, as is a payout of
+# `absurd_payout` or more from a repo under `absurd_needs_stars`. Raise them if
+# fake bounties still get through; `credible_stars = 0` trusts everything.
+credible_stars = 5
+absurd_payout = 10000.0
+absurd_needs_stars = 1000

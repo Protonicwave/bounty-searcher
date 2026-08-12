@@ -1,0 +1,115 @@
+@import 'tailwindcss';
+
+/* The design tokens, lifted from the agreed mockup. This block is the single
+   source of truth for colour, type and density: no literal colour value or
+   pixel size belongs anywhere else in the codebase.
+
+   Static because several of these are read at runtime rather than through a
+   utility class. A score rail picks its segment colour from the component name
+   the API sent, so Tailwind cannot see the reference and would otherwise drop
+   the variable as unused. */
+@theme static {
+  /* surfaces */
+  --color-bg: #0c0d0f;
+  --color-surface: #101215;
+  --color-line: #1c1f24;
+  --color-line-soft: #16191d;
+  /* the only line weight that reads as a border rather than a seam */
+  --color-line-strong: #2c3037;
+
+  /* text, in four steps down from legible to barely there */
+  --color-fg: #e4e7ea;
+  --color-fg-dim: #8b9197;
+  --color-fg-dimmer: #565c63;
+  --color-fg-ghost: #3a3f45;
+  /* prose sits one step below the interface: it is read, not scanned */
+  --color-prose: #b9bfc5;
+
+  /* the one accent: current selection, and nothing else */
+  --color-accent: #e3a34a;
+  --color-accent-bg: #191510;
+  --color-accent-rule: #4a3a1c;
+
+  /* the six score components, named for the values the API sends. Low
+     saturation and close in value, so a rail reads as one object until you
+     look straight at it. */
+  --color-score-payout: #9a8248;
+  --color-score-language: #4f7a87;
+  --color-score-effort: #7a6a9a;
+  --color-score-freshness: #5c8a5e;
+  --color-score-competition: #a0625f;
+  --color-score-repository: #616973;
+
+  --font-mono:
+    'Berkeley Mono', 'Commit Mono', 'Cascadia Mono', 'Cascadia Code',
+    ui-monospace, 'SF Mono', Consolas, monospace;
+  --font-sans:
+    ui-sans-serif, 'Segoe UI Variable Text', 'Segoe UI', system-ui,
+    -apple-system, sans-serif;
+
+  /* Absolute sizes, not a relative scale. The interface is dense by intent
+     and every step here was measured against the mockup. */
+  --text-xs: 11px;
+  --text-xs--line-height: 13px;
+  --text-sm: 12px;
+  --text-sm--line-height: 16px;
+  --text-base: 13px;
+  --text-base--line-height: 15px;
+  --text-lg: 15px;
+  --text-lg--line-height: 21px;
+  --text-3xl: 28px;
+  --text-3xl--line-height: 28px;
+
+  --tracking-status: 0.02em;
+  --tracking-meta: 0.04em;
+  --tracking-brand: 0.1em;
+
+  /* Density. The row height is fixed because the list is virtualised, so it
+     is a token rather than a consequence of the row's padding. */
+  --spacing-row: 50px;
+  --spacing-status: 30px;
+  /* Prose measure. Full-width body copy is the loudest tell of an interface
+     built without a typographer. */
+  --container-measure: 62ch;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-mono);
+    font-size: var(--text-base);
+    /* Figures line up column to column, which is most of why a dense list
+       reads at all. */
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* Titles run out rather than stop. An ellipsis on every row of a dense list is
+   noise, and the fade says the same thing without adding a character. */
+@utility fade-right {
+  overflow: hidden;
+  white-space: nowrap;
+  mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent 100%);
+}
+
+@utility scrollbar-thin {
+  &::-webkit-scrollbar {
+    width: 10px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: var(--color-line);
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
